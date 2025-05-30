@@ -1,0 +1,43 @@
+{% extends 'dicom_processor/base.html' %}
+
+{% block title %}My Uploads{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">My Uploaded DICOM Series</h2>
+
+{% if series_list %}
+    <ul class="list-group">
+        {% for series in series_list %}
+            <li class="list-group-item d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>{{ series.name }}</strong><br>
+                    <small>Uploaded at: {{ series.uploaded_date }}</small>
+                </div>
+
+                <div class="d-flex gap-2">
+                    <!-- Process button -->
+                    <a href="{% url 'process_dicom' series.id %}" class="btn btn-sm btn-outline-warning">
+                        Process
+                    </a>
+
+                    <!-- View button -->
+                    <a href="{% url 'view_result' series.id %}?view=axial&slice=0" class="btn btn-sm btn-outline-success">
+                        View
+                    </a>
+
+                    <!-- Delete button with confirmation -->
+                    <form method="post" action="{% url 'delete_dicom' series.id %}" style="display:inline;"
+                          onsubmit="return confirm('Are you sure you want to delete &quot;{{ series.name }}&quot; DICOM series?');">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            Delete
+                        </button>
+                    </form>
+                </div>
+            </li>
+        {% endfor %}
+    </ul>
+{% else %}
+    <p>You haven’t uploaded anything yet.</p>
+{% endif %}
+{% endblock %}

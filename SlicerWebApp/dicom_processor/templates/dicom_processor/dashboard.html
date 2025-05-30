@@ -1,0 +1,112 @@
+{% extends 'dicom_processor/base.html' %}
+{% block title %}Dashboard | Slicer Web App{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row" style="height: 88vh;">
+        <!-- Sidebar -->
+        <div class="col-md-2 d-flex flex-column bg-light p-3 border-end">
+            <a href="{% url 'upload_dicom' %}" class="btn btn-primary mb-3 w-100">Upload</a>
+
+            {% if series_id %}
+                <a href="{% url 'process_dicom' series_id %}" class="btn btn-warning mb-3 w-100">Predict</a>
+                <a href="{% url 'view_result' series_id %}" class="btn btn-success mb-3 w-100">View</a>
+            {% else %}
+                <button class="btn btn-warning mb-3 w-100" disabled title="Upload a series first">Predict</button>
+                <button class="btn btn-success mb-3 w-100" disabled title="Upload a series first">View</button>
+            {% endif %}
+
+            <div class="mt-auto text-center">
+                <button class="btn btn-outline-secondary btn-sm mb-2">▲</button><br>
+                <button class="btn btn-outline-secondary btn-sm">▼</button>
+            </div>
+        </div>
+
+        <!-- Main Display -->
+        <div class="col-md-10 d-flex flex-column">
+            <!-- Patient Info -->
+            <div class="d-flex justify-content-between px-4 py-2 bg-white border-bottom">
+                <div><strong>Patient ID:</strong> {{ patient_id }}</div>
+                <div><strong>Age:</strong> {{ patient_age }}</div>
+                <div><strong>Gender:</strong> {{ patient_gender }}</div>
+            </div>
+
+            <!-- 2x2 Viewer Grid -->
+            <div class="d-flex justify-content-center align-items-center bg-dark flex-grow-1">
+                <div class="d-flex flex-column" style="width: 500px; height: 500px;">
+                    <div class="d-flex flex-grow-1">
+                        <div class="viewer-box border bg-black" id="axialView" style="flex: 1;"></div>
+                        <div class="viewer-box border bg-black" id="renderView" style="flex: 1;"></div>
+                    </div>
+                    <div class="d-flex flex-grow-1">
+                        <div class="viewer-box border bg-black" id="sagittalView" style="flex: 1;"></div>
+                        <div class="viewer-box border bg-black" id="coronalView" style="flex: 1;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chart Area -->
+            <div class="bg-white p-3">
+                <canvas id="intensityChart" style="max-height: 200px;"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Chart.js for graph -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    const ctx = document.getElementById('intensityChart').getContext('2d');
+    const intensityChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ x_axis_labels|safe }},
+            datasets: [{
+                label: 'Prediction Intensity',
+                data: {{ y_axis_values|safe }},
+                borderColor: 'rgba(0, 123, 255, 1)',
+                backgroundColor: 'rgba(0, 123, 255, 0.1)',
+                tension: 0.3
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Slice #'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Intensity'
+                    }
+                }
+            }
+        }
+    });
+</script>
+
+
+
+<style>
+.viewer-box {
+    position: relative;
+}
+.viewer-box::before {
+    content: attr(id);
+    color: white;
+    font-size: 14px;
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    z-index: 10;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,42 @@
+{% extends 'dicom_processor/base.html' %}
+
+{% block title %}Process DICOM Series{% endblock %}
+
+{% block content %}
+    <h1>Process DICOM Series: {{ series.name }}</h1>
+    <p>Upload Date: {{ series.upload_date }}</p>
+    
+    <div class="row mt-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    Processing Options
+                </div>
+                <div class="card-body">
+                    <form method="post">
+                        {% csrf_token %}
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" value="heatmap" id="heatmapCheck" name="process_type">
+                            <label class="form-check-label" for="heatmapCheck">
+                                Generate Heatmap
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Process</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    Series Information
+                </div>
+                <div class="card-body">
+                    <p><strong>Directory:</strong> {{ series.file_path }}</p>
+                    <p><strong>Owner:</strong> {{ series.user.username }}</p>
+                    <!-- Additional information would go here -->
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
