@@ -6,5 +6,7 @@ urlpatterns = [
     path('process/<int:series_id>/', views.process_dicom, name='process_dicom'),
     path('delete/<int:series_id>/', views.delete_dicom, name='delete_dicom'),
     #path('result/<int:result_id>/', views.view_result, name='view_result'), 
+    path('ajax/get_slice_url/', views.get_slice_url_ajax, name='ajax_get_slice_url'),
+    path('ajax/get_vti_url/<int:series_id>/', views.get_vti_url, name='ajax_get_vti_url'),
+ ]
 
-]

@@ -1,10 +1,15 @@
 {% extends 'dicom_processor/base.html' %}
+{% comment %} 
+    File: SlicerWebApp/dicom_processor/templates/dicom_processor/process.html
+    Fix: Ensured that the '{% extends ... %}' tag is the very first line in the file
+    with no preceding spaces, comments, or newlines.
+{% endcomment %}
 
 {% block title %}Process DICOM Series{% endblock %}
 
 {% block content %}
     <h1>Process DICOM Series: {{ series.name }}</h1>
-    <p>Upload Date: {{ series.upload_date }}</p>
+    <p>Upload Date: {{ series.uploaded_date }}</p>
     
     <div class="row mt-4">
         <div class="col-md-6">
@@ -13,15 +18,36 @@
                     Processing Options
                 </div>
                 <div class="card-body">
-                    <form method="post">
+                    <form method="post" id="processForm">
                         {% csrf_token %}
-                        <div class="form-check mb-3">
-                            <input class="form-check-input" type="checkbox" value="heatmap" id="heatmapCheck" name="process_type">
-                            <label class="form-check-label" for="heatmapCheck">
-                                Generate Heatmap
-                            </label>
+
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <div>
+                                <input class="form-check-input" type="checkbox" value="heatmap" id="heatmapCheck" name="process_type" checked disabled>
+                                <label class="form-check-label" for="heatmapCheck">
+                                    Generate Heatmap
+                                </label>
+                            </div>
+                            
+                            {% if latest_result %}
+                                <div>
+                                    <span class="badge bg-primary fs-6">
+                                        Prediction Score: {{ latest_result.heatmap_intensity|floatformat:2 }}
+                                    </span>
+                                </div>
+                            {% endif %}
                         </div>
-                        <button type="submit" class="btn btn-primary">Process</button>
+                        
+                        <button type="submit" class="btn btn-primary" id="processButton">
+                            <span id="spinner" class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                            <span id="buttonText">
+                                {% if latest_result %}
+                                    Re-Process
+                                {% else %}
+                                    Process
+                                {% endif %}
+                            </span>
+                        </button>
                     </form>
                 </div>
             </div>
@@ -34,9 +60,32 @@
                 <div class="card-body">
                     <p><strong>Directory:</strong> {{ series.file_path }}</p>
                     <p><strong>Owner:</strong> {{ series.user.username }}</p>
-                    <!-- Additional information would go here -->
+                    <p>Click "Process" to run the analysis model. This may take several minutes depending on the size of the scan.</p>
                 </div>
             </div>
         </div>
     </div>
+{% endblock %}
+
+{% block scripts %}
+{{ block.super }} {# This keeps scripts from base.html #}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const processForm = document.getElementById('processForm');
+        
+        if (processForm) {
+            processForm.addEventListener('submit', function() {
+                const processButton = document.getElementById('processButton');
+                const spinner = document.getElementById('spinner');
+                const buttonText = document.getElementById('buttonText');
+
+                if (processButton) {
+                    processButton.disabled = true;
+                    if (spinner) spinner.style.display = 'inline-block';
+                    if (buttonText) buttonText.textContent = 'Processing... Please Wait';
+                }
+            });
+        }
+    });
+</script>
 {% endblock %}
