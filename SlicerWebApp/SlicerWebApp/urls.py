@@ -31,14 +31,19 @@ urlpatterns = [
     path('my-uploads/', dicom_views.my_uploads, name='my_uploads'),
     path('view/<int:series_id>/', dicom_views.view_result, name='view_result'),
 
-    #modified dashboard path where it will take the use to the dashboard page with all four views.
+    #dashboard path where it will take the use to the dashboard page with all four views.
     path('dashboard/<int:series_id>/', dicom_views.dashboard_view, name='dashboard_series_view'),
 
     #if there is no id, then redirect it to the latest dashboard view:
     path('dashboard/', dicom_views.dashboard_view, name='dashboard_latest_view'),
    
+]
 
+if settings.DEBUG:
+    # This line serves  user-uploaded media files (like .nrrd files)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+    # This NEW line serves  project's static files (like vtk.js)
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
 
-] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
 
 

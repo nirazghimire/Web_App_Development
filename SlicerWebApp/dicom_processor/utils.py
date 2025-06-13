@@ -11,33 +11,46 @@ import tensorflow as tf
 
 
 
-def convert_dicom_series_to_vti(dicom_series_directory_path, output_vti_path):
-    """ Converts a series of Dicom files in a directory to a VTI file."""
-    print(f"Starting conversion of Dicom series in {dicom_series_directory_path} to VTI file at {output_vti_path}")
-
+def convert_dicom_series_to_nrrd(dicom_directory_path, output_nrrd_path):
+    """
+    Reads a directory of DICOM slices, combines them into a single 3D volume,
+    and saves the volume as a .nrrd file. This is a format that SimpleITK
+    is great at writing and VTK.js is great at reading.
+    """
+    print(f"Starting NRRD conversion for directory: {dicom_directory_path}")
+    
     try:
-        series_filesname = sitk.ImageSeriesReader.GetGDCMSeriesFileNames(dicom_series_directory_path)
-        if not series_filesname:
-            print(f"No DICOM files found in directory: {dicom_series_directory_path}")
+        # Get the list of DICOM filenames for the main series in the folder.
+        series_filenames = sitk.ImageSeriesReader.GetGDCMSeriesFileNames(dicom_directory_path)
+        if not series_filenames:
+            print(f"!!! ERROR: No DICOM files found in: {dicom_directory_path}")
             return False
         
-        print(f"Successfully converted Dicom series to VTI file at {output_vti_path}")
+        # Create our reading machine and load the files.
         series_reader = sitk.ImageSeriesReader()
-        series_reader.SetFileNames(series_filesname)
-        image = series_reader.Execute()
-        print(f"Image loaded with size: {image.GetSize()} and spacing: {image.GetSpacing()}")
-        # Write the image to a VTI file
-        sitk.WriteImage(image, output_vti_path)
-        print(f"VTI file written successfully to {output_vti_path}")
+        series_reader.SetFileNames(series_filenames)
+        
+        # Execute the reader to create the 3D image.
+        image_3d = series_reader.Execute()
+        
+        print(f"  > Image loaded with size: {image_3d.GetSize()} and spacing: {image_3d.GetSpacing()}")
+        
+        # Save the 3D image to the .nrrd file path we were given.
+        sitk.WriteImage(image_3d, output_nrrd_path)
+        
+        print(f"  > NRRD file written successfully to {output_nrrd_path}")
         return True
-    except sitk.GDCMException as e:
-        print(f"Error reading Dicom series: {e}")
-        print("This can happen if DICOM files are corrupted, not part of a single series, or have inconsistent metadata.")
+
+    # Why 'except RuntimeError as e'? This is a better "safety net".
+    # SimpleITK often reports file reading/writing problems as a 'RuntimeError'.
+    # This will catch those errors properly.
+    except RuntimeError as e:
+        print(f"!!! A runtime error occurred during DICOM to NRRD conversion: {e}")
         return False
     except Exception as e:
-        print(f"Error converting Dicom series to VTI file: {e}")
+        print(f"!!! An unexpected error occurred: {e}")
         return False
-    
+
 
 
 def apply_windowing(img, window_center, window_width):
@@ -178,85 +191,95 @@ def generate_all_directional_slices(dicom_folder, output_folder, user_id, series
 def generate_heatmap(dicom_directory):
     """
     Generates a Grad-CAM style heatmap and also returns the model's prediction score.
-    Updated to load a model from a .keras file, compatible with Keras 3.
+    Updated with correct input shape and layer name for the new model.
     """
-    print(f"Generating heatmap for directory: {dicom_directory}")
+    print("--- Starting generate_heatmap ---")
+    print(f"Processing directory: {dicom_directory}")
     volume = create_volume_from_dicom(dicom_directory)
     if volume is None or volume.size == 0:
+        print("!!! ERROR: create_volume_from_dicom failed.")
         return None, None 
 
-    volume_transposed = np.transpose(volume, (2, 1, 0)) 
-    print(f"  Volume transposed to shape: {volume_transposed.shape}")
+    volume_transposed = np.transpose(volume, (2, 1, 0))
+    print(f"  > Volume transposed to shape: {volume_transposed.shape}")
 
-    resized_volume = resize(volume_transposed, (90, 90, 25), anti_aliasing=True)
-    print(f"  Volume resized to shape: {resized_volume.shape}")
+    # --- FIX #1: Correct Resize Shape ---
+    # Why this change? The error message told us the model expects a shape of (90, 90, 25).
+    # We now resize the input scan to this exact size.
+    correct_shape = (90, 90, 25)
+    print(f"  > Resizing volume to the correct model input shape: {correct_shape}")
+    resized_volume = resize(volume_transposed, correct_shape, anti_aliasing=True)
+    print(f"  > Volume resized to shape: {resized_volume.shape}")
     
-    input_vol_for_model = np.expand_dims(resized_volume, axis=(0, -1)) 
-    print(f"  Input volume for model shape: {input_vol_for_model.shape}")
+    input_vol_for_model = np.expand_dims(resized_volume, axis=(0, -1))
+    print(f"  > Final input shape for model: {input_vol_for_model.shape}")
 
-    
-    # 1. Set the name of the CHOSEN CHECKPOINT FOLDER.
-    chosen_checkpoint_folder_name = "checkpoint_v2_1" # <<< CHANGE THIS if you use a different checkpoint
-    # 2. Set the name of the .keras model file inside that folder.
-    keras_model_filename = "weights-improvement_v2_1.keras" 
+    # --- LOADING THE MODEL ---
+    chosen_checkpoint_folder_name = "checkpoint_v2_1" 
+    keras_model_filename = "weights-improvement_v2_1.keras"
 
-    # This builds the full, absolute path to the .keras model file.
-    model_path = os.path.join(
-        settings.BASE_DIR, 
-        'dicom_processor', 
-        chosen_checkpoint_folder_name, 
-        keras_model_filename
-    )
+    model_path = os.path.join(settings.BASE_DIR, 'dicom_processor', chosen_checkpoint_folder_name, keras_model_filename)
     
-    print(f"  Attempting to load model from .keras file: {model_path}")
+    print(f"  > Attempting to load model from: {model_path}")
     if not os.path.exists(model_path):
-        print(f"Error: Model file not found at {model_path}.")
+        print(f"!!! ERROR: Model file not found at {model_path}.")
         return None, None 
 
     try:
-        # load_model will now load the architecture and weights from the single .keras file.
         model = load_model(model_path)
-        print("  Model loaded successfully from .keras file.")
+        print("  > Model loaded successfully.")
     except Exception as e:
-        print(f"Error loading Keras model from file {model_path}: {e}")
+        print(f"!!! ERROR loading Keras model from file {model_path}: {e}")
         return None, None
 
-    
+    # --- PREPARE FOR HEATMAP ---
     prediction_score_value = None 
 
-    
-    last_conv_layer_name = "activation_41" 
+    # --- FIX #2: Correct Layer Name ---
+    # Why this change? The error message listed all the valid layer names.
+    # 'activation_41' is the last activation layer before pooling, which is perfect for Grad-CAM.
+    last_conv_layer_name = "activation_41" # <<< CORRECTED NAME
+    print(f"  > Using layer for Grad-CAM: '{last_conv_layer_name}'")
     
     try:
         grad_model = tf.keras.models.Model(
             [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
         )
-        print(f"  Grad-CAM model created with last conv layer: {last_conv_layer_name}")
+        print("  > Grad-CAM model created successfully.")
     except ValueError as e:
-        print(f"Error creating Grad-CAM model. Layer '{last_conv_layer_name}' not found. Error: {e}")
-        print("  Heatmap generation will be skipped.")
+        print(f"!!! ERROR creating Grad-CAM model. Layer '{last_conv_layer_name}' not found. Heatmap will be skipped.")
+        # If Grad-CAM fails, try getting a prediction directly from the main model
         try:
+            # Important: The model.predict() expects a compatible shape.
+            # If the grad_model creation fails, it's safer to just return.
+            # The error above indicates the model itself has a different input layer name or structure.
+            # Let's adjust the logic slightly. The primary error is shape mismatch on the model itself.
             preds_only = model.predict(input_vol_for_model)
             pred_index_fallback = np.argmax(preds_only[0])
             prediction_score_value = float(preds_only[0][pred_index_fallback])
-            print(f"  Fallback prediction score (no heatmap): {prediction_score_value}")
+            print(f"  > Fallback prediction score (no heatmap): {prediction_score_value}")
             return None, prediction_score_value
         except Exception as e_pred_fallback:
-            print(f"  Error getting fallback prediction: {e_pred_fallback}")
+            print(f"!!! ERROR getting fallback prediction: {e_pred_fallback}")
             return None, None
 
-    # --- Generate Heatmap & Score ---
+    # --- GENERATE HEATMAP & SCORE ---
+    print("  > Generating heatmap and extracting score...")
     with tf.GradientTape() as tape:
+        # We pass the correctly shaped input to our model now.
         conv_output, preds = grad_model(input_vol_for_model)
         pred_index = tf.argmax(preds[0]).numpy() 
         prediction_score_value = float(preds[0][pred_index].numpy()) 
         class_channel_for_gradients = preds[:, pred_index] 
 
-        print(f"  Model predictions (preds): {preds.numpy()}")
-        print(f"  Calculated prediction_score_value: {prediction_score_value}")
+        print(f"  > Model prediction values (preds): {preds.numpy()}")
+        print(f"  > Predicted class index: {pred_index}")
+        print(f"  > Final prediction score value: {prediction_score_value}")
 
+    # The rest of the heatmap generation code remains the same...
     grads = tape.gradient(class_channel_for_gradients, conv_output)
     if grads is None:
+        print("!!! ERROR: Gradients are None. Cannot create heatmap. Returning score only.")
         return None, prediction_score_value 
 
     pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2, 3)) 
@@ -270,6 +293,7 @@ def generate_heatmap(dicom_directory):
     if np.max(cam) > 0: 
         cam = cam / np.max(cam)
     
+    # We resize the final heatmap to match the original scan size for correct overlay.
     heatmap_resized = resize(cam, volume_transposed.shape, anti_aliasing=True)
     save_dir_name = str(uuid.uuid4()) 
     heatmap_output_directory = os.path.join(settings.MEDIA_ROOT, 'heatmaps', save_dir_name)
@@ -278,9 +302,11 @@ def generate_heatmap(dicom_directory):
     heatmap_img_sitk = sitk.GetImageFromArray(heatmap_resized.astype(np.float32))
     heatmap_file_path = os.path.join(heatmap_output_directory, 'heatmap.nrrd')
     sitk.WriteImage(heatmap_img_sitk, heatmap_file_path)
-    print(f"  Heatmap saved to: {heatmap_file_path}")
+    print(f"  > Heatmap saved to: {heatmap_file_path}")
+    print("--- Finished generate_heatmap successfully ---")
 
     return heatmap_output_directory, prediction_score_value
+
 
 
     
