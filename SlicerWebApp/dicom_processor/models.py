@@ -22,16 +22,38 @@ class DicomSeries(models.Model):
     
 class ProcessingResult(models.Model):
     """
-    Model to store processing results of DICOM series.
+    Stores the results of processing a DicomSeries.
+    This links a DicomSeries to its generated data, like heatmaps and predictions.
     """
-    dicom_series = models.ForeignKey(DicomSeries, on_delete=models.CASCADE, related_name='processing_results')
-    result_file_path = models.CharField(max_length=255)
-    processed_date = models.DateTimeField(auto_now_add=True)
-    result_type = models.CharField(max_length=50) 
-    heatmap_intensity = models.FloatField()
-    processed_slices = models.IntegerField()
+    dicom_series = models.OneToOneField(
+        DicomSeries,
+        on_delete=models.CASCADE,
+        related_name='processing_result'
+    )
+    result_type = models.CharField(max_length=50, default='heatmap_and_prediction')
+    
+    # === MODIFICATION START ===
+    # We now store paths and both prediction probabilities directly.
+    
+    # Path to the generated heatmap NRRD file
+    heatmap_file_path = models.CharField(max_length=512, blank=True, null=True)
 
+    # Path to the generated volume NRRD file for the 3D viewer
+    nrrd_file_path = models.CharField(max_length=512, blank=True, null=True)
+    
+    # Store both probabilities from the model.
+    # We assume the model outputs probabilities for two classes.
+    ece_probability = models.FloatField(null=True, blank=True)
+    non_ece_probability = models.FloatField(null=True, blank=True)
+
+    # === MODIFICATION END ===
+
+    processed_date = models.DateTimeField(auto_now_add=True)
+    
+    # Storing slice counts as a JSON string to avoid recalculating
+    # e.g., "{'axial': 128, 'coronal': 256, 'sagittal': 256}"
+    slice_counts_json = models.TextField(blank=True, null=True)
 
     def __str__(self):
-        return f"{self.result_type} for  {self.dicom_series.name}"
-    
+        return f"Result for {self.dicom_series.name}"
+

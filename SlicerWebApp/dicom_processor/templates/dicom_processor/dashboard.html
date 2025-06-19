@@ -1,118 +1,308 @@
 {% extends 'dicom_processor/base.html' %}
 
-{% block title %}VTK Dashboard Test{% endblock %}
+{% block title %}
+    {% if series %}
+        Dashboard - {{ series.name }}
+    {% else %}
+        Dashboard
+    {% endif %}
+{% endblock %}
 
 {% block content %}
+    {# --- Main container for the entire page --- #}
     <div class="container-fluid vh-100 d-flex flex-column p-2">
 
-        <div class="row g-0 mb-2">
-            <div class="col"><div class="d-flex justify-content-between px-3 py-2 bg-light border rounded align-items-center">... (Your info bar) ...</div></div>
+        {# --- Top Information Bar --- #}
+        <div class="row g-2 mb-2">
+            <div class="col">
+                <div class="d-flex justify-content-between px-3 py-2 bg-light border rounded align-items-center">
+                    {% if series %}
+                        <div>
+                            <strong>Patient:</strong> {{ series.patient_id|default:"N/A" }} |
+                            <strong>Age:</strong> {{ series.patient_age|default:"N/A" }} |
+                            <strong>Gender:</strong> {{ series.patient_gender|default:"N/A" }}
+                        </div>
+                        <div>
+                            <strong class="text-primary">Series:</strong> {{ series.name }}
+                        </div>
+                    {% else %}
+                        <div class="text-muted">No series selected. Please go to "My Uploads" to choose one.</div>
+                    {% endif %}
+                </div>
+            </div>
         </div>
+
+        {# --- Main 4-Panel Viewer Layout --- #}
         <div class="row g-2 flex-grow-1">
-            <div class="col-md-8">
-                <div class="row g-2 h-100">
+            {# --- Left Column (3D View + Control Panel) --- #}
+            <div class="col-md-8 d-flex flex-column">
+                <div class="row g-2 flex-grow-1">
+                    {# -- 3D Viewport -- #}
                     <div class="col-12 d-flex">
                         <div class="viewer-container">
-                            <div class="viewer-header">VTK.js Cone Test View</div>
-                            <div class="viewer-box" id="renderView"></div>
+                            <div class="viewer-header">3D View</div>
+                            <div class="viewer-box" id="view3D"></div>
+                        </div>
+                    </div>
+                </div>
+                 <div class="row g-2 mt-1">
+                    {# -- Control Panel -- #}
+                    <div class="col-12">
+                         <div class="bg-light border rounded p-2" id="controlPanel">
+                             {# VTK.js will add UI controls here #}
+                         </div>
+                    </div>
+                 </div>
+            </div>
+
+            {# --- Right Column (Slice Views) --- #}
+            <div class="col-md-4 d-flex flex-column">
+                <div class="row g-2 flex-grow-1">
+                     {# -- Axial Viewport -- #}
+                    <div class="col-12 d-flex">
+                        <div class="viewer-container">
+                            <div class="viewer-header">Axial</div>
+                            <div class="viewer-box" id="viewAxial"></div>
+                        </div>
+                    </div>
+                </div>
+                 <div class="row g-2 mt-2 flex-grow-1">
+                     {# -- Sagittal Viewport -- #}
+                    <div class="col-12 d-flex">
+                         <div class="viewer-container">
+                            <div class="viewer-header">Sagittal</div>
+                            <div class="viewer-box" id="viewSagittal"></div>
+                        </div>
+                    </div>
+                </div>
+                 <div class="row g-2 mt-2 flex-grow-1">
+                     {# -- Coronal Viewport -- #}
+                    <div class="col-12 d-flex">
+                         <div class="viewer-container">
+                            <div class="viewer-header">Coronal</div>
+                            <div class="viewer-box" id="viewCoronal"></div>
                         </div>
                     </div>
                 </div>
             </div>
-            <div class="col-md-4">
-                <p class="text-muted">Other viewers are disabled for this test.</p>
+        </div>
+
+        {# --- Loading Overlay --- #}
+        <div id="loadingOverlay" style="display: flex;">
+            <div id="loadingMessage" class="text-light">
+                <div class="spinner-border me-3" role="status"></div>
+                <span>Initializing 3D Viewer...</span>
             </div>
         </div>
-        <div id="loadingOverlay"><p class="text-light">Running VTK.js Test...</p></div>
     </div>
 {% endblock %}
 
 
 {% block styles %}
+{{ block.super }}
 <style>
-    .vh-100 { height: 100vh; } .viewer-container { width: 100%; height: 100%; display: flex; flex-direction: column; background-color: #343a40; border: 1px solid #495057; border-radius: 0.25rem; } .viewer-header { text-align: center; color: #f8f9fa; padding: 4px; background-color: #495057; font-size: 0.9em; font-weight: bold; } .viewer-box { flex-grow: 1; position: relative; overflow: hidden; min-height: 150px; } #loadingOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.75); display: none; justify-content: center; align-items: center; flex-direction: column; z-index: 1000; }
+    /* Basic layout and styling for the viewer panels */
+    .vh-100 { height: 90vh; }
+    .viewer-container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        background-color: #000; /* Black background for viewers */
+        border: 1px solid #495057;
+        border-radius: 0.25rem;
+    }
+    .viewer-header {
+        text-align: center;
+        color: #f8f9fa;
+        padding: 4px;
+        background-color: #343a40;
+        font-size: 0.9em;
+        font-weight: bold;
+    }
+    .viewer-box {
+        flex-grow: 1;
+        position: relative;
+        overflow: hidden;
+        min-height: 150px; /* Ensure viewers have a minimum height */
+    }
+    #loadingOverlay {
+        position: fixed; top: 0; left: 0;
+        width: 100%; height: 100%;
+        background-color: rgba(0, 0, 0, 0.85);
+        display: flex; /* Hidden by default, shown via JS */
+        justify-content: center; align-items: center;
+        flex-direction: column;
+        z-index: 1000;
+        color: white;
+        font-size: 1.2rem;
+    }
 </style>
 {% endblock %}
 
 
 {% block scripts %}
-    {{ block.super }} 
-    
-    {# --- THE ONLY MAJOR CHANGE IS THIS ONE LINE --- #}
-    {# Why this change? We are trying a different, more reliable Content Delivery Network (CDN)
-       to load the full VTK.js library. This often solves issues where some modules
-       appear to be missing from the main 'vtk' object. #}
+    {{ block.super }}
+
+    {# --- Load the full VTK.js library from a reliable CDN --- #}
     <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/vtk.js@29.13.0/dist/vtk.js"></script>
 
     <script>
-        // The rest of our simple "Cone Test" script remains the same.
-        // Its only job is to see if the core VTK.js rendering pipeline is working.
-        document.addEventListener('DOMContentLoaded', function () {
-            
-            const loadingOverlay = document.getElementById('loadingOverlay');
-            loadingOverlay.style.display = 'flex';
+    document.addEventListener('DOMContentLoaded', function () {
+        // Only run the script if a series is loaded on the page
+        {% if series and series.id %}
 
-            // Safety Check 1: Did the main 'vtk' toolbox load?
-            if (typeof vtk === 'undefined') {
-                console.error("CRITICAL ERROR: VTK.js library not loaded.");
-                loadingOverlay.innerHTML = `<p class="text-danger p-3"><b>Critical Error:</b> The 3D viewer library (vtk.js) failed to load. Please check your internet connection.</p>`;
-                return;
-            }
+        // --- Global variables ---
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const loadingMessage = document.getElementById('loadingMessage');
+        const controlPanel = document.getElementById('controlPanel');
+        const seriesId = {{ series.id }};
 
-            const renderViewContainer = document.getElementById('renderView');
-            if (!renderViewContainer) {
-                console.error("Could not find the 'renderView' container div.");
-                loadingOverlay.innerHTML = `<p class="text-danger p-3">Page Error: The viewer container is missing.</p>`;
-                return;
-            }
+        // Check if the main 'vtk' object is available
+        if (typeof vtk === 'undefined') {
+            loadingMessage.innerHTML = `<p class="text-danger p-3"><b>Critical Error:</b> The 3D viewer library (vtk.js) failed to load. Please check your internet connection and ad-blockers.</p>`;
+            return;
+        }
 
-            // Get the specific tools we need to draw a cone.
-            const vtkGenericRenderWindow = vtk.Rendering.Misc.vtkGenericRenderWindow;
-            const vtkActor = vtk.Rendering.Core.vtkActor;
-            const vtkMapper = vtk.Rendering.Core.vtkMapper;
-            const vtkConeSource = vtk.Filters.Sources.vtkConeSource;
+        // --- Core VTK.js objects ---
+        const vtkHttpDataAccessHelper = vtk.IO.Core.vtkHttpDataAccessHelper;
+        const vtkNrrdReader = vtk.IO.Core.vtkNrrdReader;
+        const vtkVolume = vtk.Rendering.Core.vtkVolume;
+        const vtkVolumeMapper = vtk.Rendering.Core.vtkVolumeMapper;
+        const vtkGenericRenderWindow = vtk.Rendering.Misc.vtkGenericRenderWindow;
+        const vtkColorTransferFunction = vtk.Rendering.Core.vtkColorTransferFunction;
+        const vtkPiecewiseFunction = vtk.Common.DataModel.vtkPiecewiseFunction;
+        const vtkVolumeController = vtk.Interaction.UI.vtkVolumeController;
+        const vtkAxesActor = vtk.Rendering.Core.vtkAxesActor;
+        const vtkOrientationMarkerWidget = vtk.Interaction.Widgets.vtkOrientationMarkerWidget;
 
-            // Safety Check 2: Are these specific tools available?
-            if (!vtkGenericRenderWindow || !vtkActor || !vtkMapper || !vtkConeSource) {
-                 console.error("One or more required VTK modules for the cone test are missing.");
-                 loadingOverlay.innerHTML = `<p class="text-danger p-3">Error: Core 3D components are missing from the library. The library might be corrupted or only partially loaded.</p>`;
-                 return;
-            }
-            
-            console.log("VTK.js library and core components seem to be loaded. Attempting to render a cone...");
-
+        // --- Main execution function ---
+        async function main() {
             try {
-                // Setup the 3D scene (the "stage").
-                const renderWindow = vtkGenericRenderWindow.newInstance({ background: [0.2, 0.3, 0.4] });
-                renderWindow.setContainer(renderViewContainer);
-                renderWindow.resize();
-                const renderer = renderWindow.getRenderer();
-                const vtkApiRenderWindow = renderWindow.getRenderWindow();
+                // Step 1: Fetch the NRRD data URL from our Django backend
+                loadingMessage.querySelector('span').textContent = 'Requesting data from server...';
+                const response = await fetch(`/dicom/ajax/get_nrrd_url/${seriesId}/`);
+                if (!response.ok) {
+                    throw new Error(`Server returned an error: ${response.statusText}`);
+                }
+                const data = await response.json();
+                if (!data.success || !data.nrrd_url) {
+                    throw new Error('Server did not provide a valid data URL.');
+                }
+                const nrrdUrl = data.nrrd_url;
 
-                // Create the cone shape data.
-                const coneSource = vtkConeSource.newInstance({ height: 1.0, radius: 0.5, resolution: 20 });
+                // Step 2: Download and parse the NRRD file
+                loadingMessage.querySelector('span').textContent = 'Downloading 3D volume data...';
+                const fileContents = await vtkHttpDataAccessHelper.fetchBinary(nrrdUrl);
 
-                // Create a "mapper".
-                const mapper = vtkMapper.newInstance();
-                mapper.setInputConnection(coneSource.getOutputPort());
+                loadingMessage.querySelector('span').textContent = 'Parsing 3D volume...';
+                const reader = vtkNrrdReader.newInstance();
+                reader.parseAsArrayBuffer(fileContents);
+                const imageData = reader.getOutputData(0);
 
-                // Create an "actor".
-                const actor = vtkActor.newInstance();
+                // Step 3: Create the volume actor and mapper (the visible 3D object)
+                const actor = vtkVolume.newInstance();
+                const mapper = vtkVolumeMapper.newInstance();
+                mapper.setInputData(imageData);
+
                 actor.setMapper(mapper);
 
-                // Add the actor to our scene and render.
-                renderer.addActor(actor);
-                renderer.resetCamera();
-                vtkApiRenderWindow.render();
+                // Create a basic color and opacity mapping
+                const ctfun = vtkColorTransferFunction.newInstance();
+                ctfun.addRGBPoint(0, 0.0, 0.0, 0.0);
+                ctfun.addRGBPoint(255, 1.0, 1.0, 1.0);
+                const ofun = vtkPiecewiseFunction.newInstance();
+                ofun.addPoint(0, 0.0);
+                ofun.addPoint(255, 0.5);
+                actor.getProperty().setRGBTransferFunction(0, ctfun);
+                actor.getProperty().setScalarOpacity(0, ofun);
 
-                console.log("SUCCESS! A cone was rendered.");
+                // Step 4: Set up the 4 render windows
+                loadingMessage.querySelector('span').textContent = 'Initializing viewports...';
+                
+                // --- 3D View ---
+                const renWin3D = vtkGenericRenderWindow.newInstance({ background: [0.1, 0.2, 0.3] });
+                renWin3D.setContainer(document.getElementById('view3D'));
+                renWin3D.getRenderer().addVolume(actor);
+                
+                // Add a small orientation axis widget
+                const axes = vtkAxesActor.newInstance();
+                const orientationWidget = vtkOrientationMarkerWidget.newInstance({
+                    actor: axes,
+                    interactor: renWin3D.getInteractor(),
+                });
+                orientationWidget.setEnabled(true);
+                orientationWidget.setViewportCorner(vtkOrientationMarkerWidget.Corners.BOTTOM_LEFT);
+                orientationWidget.setViewportSize(0.15); // 15% of the viewport size
+                orientationWidget.setMinPixelSize(100);
+                orientationWidget.setMaxPixelSize(300);
+
+                // --- Slice Views ---
+                const sliceConfigs = {
+                    'Axial': { container: document.getElementById('viewAxial'), axis: 2 }, // Z-axis
+                    'Sagittal': { container: document.getElementById('viewSagittal'), axis: 0 }, // X-axis
+                    'Coronal': { container: document.getElementById('viewCoronal'), axis: 1 }  // Y-axis
+                };
+
+                Object.values(sliceConfigs).forEach(config => {
+                    const renWin = vtkGenericRenderWindow.newInstance({ background: [0, 0, 0] });
+                    renWin.setContainer(config.container);
+                    renWin.getRenderer().addVolume(actor);
+                    renWin.getRenderer().getActiveCamera().setParallelProjection(true); // Orthographic view
+                    renWin.getRenderer().resetCamera();
+
+                    // Set camera position for the specific slice view
+                    const camera = renWin.getRenderer().getActiveCamera();
+                    switch (config.axis) {
+                        case 0: // Sagittal
+                            camera.setViewUp(0, 0, -1); // Point Z up
+                            camera.setPosition(1, 0, 0); // Look along X
+                            break;
+                        case 1: // Coronal
+                            camera.setViewUp(0, 0, -1); // Point Z up
+                            camera.setPosition(0, -1, 0); // Look along Y
+                            break;
+                        case 2: // Axial
+                            camera.setViewUp(0, -1, 0); // Point Y up
+                            camera.setPosition(0, 0, 1); // Look along Z
+                            break;
+                    }
+                    renWin.getRenderer().resetCamera();
+                    renWin.resize();
+                    
+                    // Set the mapper to slice mode
+                    const sliceMapper = renWin.getRenderer().getVolumes()[0].getMapper();
+                    sliceMapper.setSlicingMode(config.axis);
+                    sliceMapper.setSlice(Math.floor(imageData.getDimensions()[config.axis] / 2));
+                });
+                
+                // Step 5: Add the main UI Controller
+                const controller = vtkVolumeController.newInstance({
+                    size: [400, 150],
+                    source: actor,
+                });
+                controller.setContainer(controlPanel);
+                controller.setupContent();
+
+                // Step 6: Render everything and hide the overlay
+                renWin3D.resize(); // Resize all windows
+                renWin3D.getRenderer().resetCamera();
+                renWin3D.render();
+
                 loadingOverlay.style.display = 'none';
 
             } catch (error) {
-                console.error("An error occurred during VTK.js rendering:", error);
-                loadingOverlay.innerHTML = `<p class="text-danger p-3">An unexpected error occurred while trying to render the 3D scene.</p>`;
+                console.error("Failed to initialize VTK.js viewer:", error);
+                loadingMessage.innerHTML = `<div class="p-3 text-center"><p class="text-danger"><b>Viewer Error</b></p><p class="text-white-50">${error.message}</p><p class="text-white-50 small">Please ensure the DICOM files form a valid 3D series and try again. You can check the browser console for more details.</p></div>`;
             }
+        }
 
-        });
+        main(); // Run the main function
+
+        {% else %}
+            // If no series is loaded, just display a message
+            document.getElementById('loadingMessage').innerHTML = `<p class="text-info">No DICOM series loaded. Please select one from <a href="{% url 'my_uploads' %}" class="link-light">My Uploads</a>.</p>`;
+        {% endif %}
+    });
     </script>
 {% endblock %}

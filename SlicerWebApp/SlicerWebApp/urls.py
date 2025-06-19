@@ -29,13 +29,13 @@ urlpatterns = [
     path('logout/', auth_views.LogoutView.as_view(next_page='/'), name='logout'),
     path('', dicom_views.home, name='home'),
     path('my-uploads/', dicom_views.my_uploads, name='my_uploads'),
-    path('view/<int:series_id>/', dicom_views.view_result, name='view_result'),
+    #path('view/<int:series_id>/', dicom_views.view_result, name='view_result'),
 
     #dashboard path where it will take the use to the dashboard page with all four views.
     path('dashboard/<int:series_id>/', dicom_views.dashboard_view, name='dashboard_series_view'),
 
     #if there is no id, then redirect it to the latest dashboard view:
-    path('dashboard/', dicom_views.dashboard_view, name='dashboard_latest_view'),
+    path('dashboard/', dicom_views.dashboard_view, name='dashboard_home'),
    
 ]
 
