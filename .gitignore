@@ -28,4 +28,10 @@ Thumbs.db
 
 # Node
 SlicerWebApp/node_modules/
+
+# ML Models
+*.keras
+*.pb
+*.pickle
+SlicerWebApp/dicom_processor/checkpoint_v2_1/saved_model/
 EOF
