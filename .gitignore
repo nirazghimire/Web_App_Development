@@ -1,37 +1,117 @@
-# Python
+# === Python ===
 __pycache__/
 *.py[cod]
-*.egg-info/
+*.so
 *.egg
-*.log
+*.egg-info/
+dist/
+build/
 *.pyo
 *.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Virtual Environments
+# === Virtual Environments ===
 venv/
 ENV/
-.env
+env/
+.venv
+.ENV
 
-# Django stuff
+# === Django ===
 db.sqlite3
+*.sqlite3
 media/
 staticfiles/
-*.sqlite3
+static/admin/
+local_settings.py
+*.sqlite
 
-# VSCode/IDE
+# === Environment Variables ===
+.env
+.env.local
+.env.*.local
+
+# === IDE & Editor ===
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
-# OS files
+# === OS Files ===
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Node
-SlicerWebApp/node_modules/
+# === Node/Frontend ===
+node_modules/
+npm-debug.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+build/
+.next/
+out/
 
-# ML Models
+# === Vite ===
+.vite/
+.viteignore
+
+# === VS Code ===
+.vscode-test/
+
+# === ML Models & Checkpoints ===
 *.keras
 *.pb
 *.pickle
-SlicerWebApp/dicom_processor/checkpoint_v2_1/saved_model/
+*.pkl
+*.h5
+*.pth
+*.pt
+checkpoint_v2_1/
+checkpoint*/
+saved_model/
+models/
+*.npy
+*.npz
+
+# === DICOM & Medical Imaging ===
+*.dcm
+*.dicom
+*.nrrd
+*.vti
+
+# === Temporary Files ===
+tmp/
+temp/
+*.tmp
+*.temp
+
+# === IDE-specific ===
+.ipynb_checkpoints/
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# === Docker ===
+docker-compose.override.yml
+
+# === MacOS ===
+.AppleDouble
+.LSOverride
+.TemporaryItems
 EOF
