@@ -1,0 +1,38 @@
+{% extends 'dicom_processor/base.html' %}
+
+{% block title %}View DICOM Series{% endblock %}
+
+{% block content %}
+<h1>{{ series.name }}</h1>
+<p><strong>Patient ID:</strong> {{ series.patient_id }}</p>
+<p><strong>Patient Age:</strong> {{ series.patient_age }}</p>
+<p><strong>Patient Gender:</strong> {{ series.patient_gender }}</p>
+
+<!-- 🔄 View switching -->
+<div class="btn-group my-3" role="group">
+    <a href="?view=axial&slice=0" class="btn btn-outline-primary {% if view == 'axial' %}active{% endif %}">Axial</a>
+    <a href="?view=coronal&slice=0" class="btn btn-outline-primary {% if view == 'coronal' %}active{% endif %}">Coronal</a>
+    <a href="?view=sagittal&slice=0" class="btn btn-outline-primary {% if view == 'sagittal' %}active{% endif %}">Sagittal</a>
+</div>
+
+<!-- 🧠 Current slice image -->
+<div class="text-center">
+    <h3>{{ view|title }} View - Slice {{ slice_index }}</h3>
+    <img src="{{ current_slice_url }}" class="img-fluid" style="max-height: 500px;">
+</div>
+
+<!-- 🔁 Scroll buttons -->
+<div class="d-flex justify-content-center mt-3">
+    <form method="get" action="">
+        <input type="hidden" name="view" value="{{ view }}">
+        <input type="hidden" name="slice" value="{{ prev_slice }}">
+        <button type="submit" class="btn btn-secondary">Previous</button>
+    </form>
+
+    <form method="get" action="" class="ms-2">
+        <input type="hidden" name="view" value="{{ view }}">
+        <input type="hidden" name="slice" value="{{ next_slice }}">
+        <button type="submit" class="btn btn-secondary">Next</button>
+    </form>
+</div>
+{% endblock %}

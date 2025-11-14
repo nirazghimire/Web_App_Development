@@ -1,0 +1,23 @@
+{
+  "name": "slicerwebapp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@kitware/vtk.js": "^34.7.0",
+    "chart.js": "^4.5.0",
+    "chartjs-plugin-datalabels": "^2.2.0"
+  },
+  "devDependencies": {
+    "vite": "^7.0.6"
+  },
+  "type": "module"
+}

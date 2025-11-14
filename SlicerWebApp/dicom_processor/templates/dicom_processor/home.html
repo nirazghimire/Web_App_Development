@@ -1,0 +1,13 @@
+{% extends 'dicom_processor/base.html' %}
+
+{% block title %}Welcome | Slicer Web App{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-center align-items-center" style="height: 70vh;">
+    <div class="text-center">
+        <h1 class="mb-4">Welcome to the Slicer Web App</h1>
+        <p class="lead mb-5">Upload your DICOM series and process medical images easily.</p>
+        <a href="{% url 'upload_dicom' %}" class="btn btn-primary btn-lg">Upload DICOM Series</a>
+    </div>
+</div>
+{% endblock %}
