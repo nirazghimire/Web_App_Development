@@ -21,19 +21,21 @@ import Chart from 'chart.js/auto';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 Chart.register(ChartDataLabels);
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     const config = JSON.parse(document.getElementById('viewer-config').textContent);
     const loadingMessage = document.getElementById('loadingMessage');
 
     if (!config.seriesId) {
-        loadingMessage.innerHTML = `<p class="text-info">No DICOM series loaded. Please select one from <a href="/my_uploads/">My Uploads</a>.</p>`;
+        loadingMessage.innerHTML = `<p class="text-info">No DICOM series loaded. Please select one from <a href="/dicom/my-uploads/">My Uploads</a>.</p>`;
         return;
     }
 
     async function setupVtk() {
         const loadingOverlay = document.getElementById('loadingOverlay');
         const allRenderWindows = [];
-        const sliceMappers = {};
+        const sliceMappers = {}; // Base image mappers
+        const heatmapMappers = {}; // Heatmap mappers
+        const heatmapActors = []; // Keep track of all heatmap actors to toggle visibility/opacity
 
         try {
             loadingMessage.querySelector('span').textContent = 'Requesting data...';
@@ -48,32 +50,58 @@ document.addEventListener('DOMContentLoaded', function() {
             const center = imageData.getCenter();
             const dims = imageData.getDimensions();
 
+            // --- Load Heatmap Data if available ---
+            let heatmapData = null;
+            if (config.heatmapUrl) {
+                try {
+                    console.log('Fetching heatmap from URL:', config.heatmapUrl);
+                    const hResponse = await fetch(config.heatmapUrl);
+                    const hData = await hResponse.json();
+                    if (hData.success) {
+                        const hFileContents = await HttpDataAccessHelper.fetchBinary(hData.heatmap_url);
+                        const hReader = vtkXMLImageDataReader.newInstance();
+                        hReader.parseAsArrayBuffer(hFileContents);
+                        heatmapData = hReader.getOutputData(0);
+                        console.log('Heatmap loaded. Dimensions:', heatmapData.getDimensions());
+                    }
+                } catch (e) {
+                    console.error("Failed to load heatmap:", e);
+                }
+            }
+
+            // --- 3D View Setup ---
             const renWin3D = vtkGenericRenderWindow.newInstance({ background: [0, 0, 0] });
             renWin3D.setContainer(document.getElementById('view3D'));
             allRenderWindows.push(renWin3D);
+
             const actor = vtkVolume.newInstance();
             const mapper = vtkVolumeMapper.newInstance();
             actor.setMapper(mapper);
             mapper.setInputData(imageData);
+
             const ctfun = vtkColorTransferFunction.newInstance();
             ctfun.addRGBPoint(-1000, 0, 0, 0);
             ctfun.addRGBPoint(500, 0.6, 0.6, 0.6);
             ctfun.addRGBPoint(1200, 1.0, 1.0, 0.9);
             ctfun.addRGBPoint(3000, 1.0, 1.0, 1.0);
+
             const ofun = vtkPiecewiseFunction.newInstance();
             ofun.addPoint(-1000, 0.0);
             ofun.addPoint(250, 0.0);
             ofun.addPoint(500, 0.2);
             ofun.addPoint(3000, 0.8);
+
             actor.getProperty().setRGBTransferFunction(0, ctfun);
             actor.getProperty().setScalarOpacity(0, ofun);
             renWin3D.getRenderer().addVolume(actor);
+
             renWin3D.getRenderer().resetCamera();
             const camera3D = renWin3D.getRenderer().getActiveCamera();
             const distance = camera3D.getDistance();
             camera3D.setPosition(center[0], bounds[2] - distance, center[2]);
             camera3D.setViewUp(0, 0, -1);
             renWin3D.getRenderer().resetCameraClippingRange();
+
             const axes = vtkAxesActor.newInstance();
             const orientationWidget = vtkOrientationMarkerWidget.newInstance({ actor: axes, interactor: renWin3D.getInteractor() });
             orientationWidget.setEnabled(true);
@@ -87,9 +115,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const coronalSliceLabel = document.getElementById('coronalSliceLabel');
             const axialSliceLabel = document.getElementById('axialSliceLabel');
             const resetButton = document.getElementById('resetViewsButton');
-            
-            // --- MODIFICATION: This function will now also call updateHeatmapSlice ---
+
+            // --- Heatmap Color Functions ---
+            const heatmapCtfun = vtkColorTransferFunction.newInstance();
+            heatmapCtfun.addRGBPoint(0, 0, 0, 1);     // Blue
+            heatmapCtfun.addRGBPoint(128, 1, 1, 0);   // Yellow
+            heatmapCtfun.addRGBPoint(255, 1, 0, 0);   // Red
+
+            const heatmapOfun = vtkPiecewiseFunction.newInstance();
+            heatmapOfun.addPoint(0, 0.0);
+            heatmapOfun.addPoint(10, 0.0);
+            heatmapOfun.addPoint(255, 0.5); // Default max opacity
+
             function updateAllSlices(i, j, k) {
+                // Update Base Mappers
                 if (sliceMappers[0] && i >= 0 && i < dims[0]) {
                     sliceMappers[0].setSlice(i);
                     sagittalSlider.value = i;
@@ -105,8 +144,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     axialSlider.value = k;
                     axialSliceLabel.textContent = k;
                 }
-                
-                updateHeatmapSlice(); // Sync the heatmap view
+
+                // Update Heatmap Mappers
+                if (heatmapMappers[0]) heatmapMappers[0].setSlice(i);
+                if (heatmapMappers[1]) heatmapMappers[1].setSlice(j);
+                if (heatmapMappers[2]) heatmapMappers[2].setSlice(k);
 
                 allRenderWindows.forEach(rw => {
                     rw.getRenderer().resetCameraClippingRange();
@@ -124,19 +166,21 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             const sliceViewConfigs = [
-                { id: 'viewAxial', axis: 2, slider: axialSlider }, 
-                { id: 'viewSagittal', axis: 0, slider: sagittalSlider }, 
+                { id: 'viewAxial', axis: 2, slider: axialSlider },
+                { id: 'viewSagittal', axis: 0, slider: sagittalSlider },
                 { id: 'viewCoronal', axis: 1, slider: coronalSlider }
             ];
             const picker = vtkPicker.newInstance();
             picker.setTolerance(0.005);
-            
+
             sliceViewConfigs.forEach(viewConfig => {
                 const renWin = vtkGenericRenderWindow.newInstance({ background: [0, 0, 0] });
                 renWin.setContainer(document.getElementById(viewConfig.id));
                 allRenderWindows.push(renWin);
                 const renderer = renWin.getRenderer();
                 const camera = renderer.getActiveCamera();
+
+                // Base Slice
                 const sliceMapper = vtkImageMapper.newInstance();
                 sliceMapper.setInputData(imageData);
                 sliceMapper.setSlicingMode(viewConfig.axis);
@@ -146,17 +190,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 slice.getProperty().setColorWindow(400);
                 slice.getProperty().setColorLevel(40);
                 renderer.addActor(slice);
+
+                // Heatmap Slice (Overlay)
+                if (heatmapData) {
+                    const hMapper = vtkImageMapper.newInstance();
+                    hMapper.setInputData(heatmapData);
+                    hMapper.setSlicingMode(viewConfig.axis);
+                    heatmapMappers[viewConfig.axis] = hMapper;
+
+                    const hActor = vtkImageSlice.newInstance();
+                    hActor.setMapper(hMapper);
+                    hActor.getProperty().setRGBTransferFunction(heatmapCtfun);
+                    hActor.getProperty().setScalarOpacity(heatmapOfun);
+                    hActor.getProperty().setOpacity(0.5); // Initial opacity
+                    hActor.setVisibility(false); // Hidden by default
+
+                    renderer.addActor(hActor);
+                    heatmapActors.push(hActor);
+                }
+
                 viewConfig.slider.max = dims[viewConfig.axis] - 1;
                 const iStyle = vtkInteractorStyleImage.newInstance();
                 renWin.getInteractor().setInteractorStyle(iStyle);
                 camera.setParallelProjection(true);
                 renderer.resetCamera();
-                 switch (viewConfig.axis) {
-                    case 0: camera.setPosition(bounds[0] - 1, center[1], center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break; 
-                    case 1: camera.setPosition(center[0], bounds[2] - 1, center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break; 
+                switch (viewConfig.axis) {
+                    case 0: camera.setPosition(bounds[0] - 1, center[1], center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break;
+                    case 1: camera.setPosition(center[0], bounds[2] - 1, center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break;
                     case 2: camera.setPosition(center[0], center[1], bounds[5] + 1); camera.setViewUp(0, -1, 0); camera.setParallelScale((bounds[3] - bounds[2]) / 2); break;
                 }
                 renderer.resetCameraClippingRange();
+
+                // Interaction
                 const interactor = renWin.getInteractor();
                 interactor.onMouseWheel(event => {
                     const currentSlice = sliceMapper.getSlice();
@@ -194,119 +259,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 const k = parseInt(e.target.value, 10);
                 updateAllSlices(sliceMappers[0].getSlice(), sliceMappers[1].getSlice(), k);
             });
-            
-            // --- START OF NEW HEATMAP IMPLEMENTATION ---
-            let heatmap = {
-                renWin: null,
-                baseMapper: null,
-                heatmapMapper: null,
-                heatmapActor: null,
-                currentAxis: 2, // Default to Axial (axis 2)
-            };
 
-            // This function syncs the heatmap's slice to match the main views
-            function updateHeatmapSlice() {
-                if (!heatmap.baseMapper) return;
+            // --- Heatmap Controls ---
+            const heatmapToggle = document.getElementById('heatmapToggle');
+            const heatmapControls = document.getElementById('heatmapControls');
+            const opacitySlider = document.getElementById('opacitySlider');
 
-                const newSliceIndex = sliceMappers[heatmap.currentAxis].getSlice();
-                heatmap.baseMapper.setSlice(newSliceIndex);
-                heatmap.heatmapMapper.setSlice(newSliceIndex);
-                heatmap.renWin.getRenderWindow().render();
-            }
+            if (heatmapToggle && heatmapControls && opacitySlider) {
+                if (heatmapData) {
+                    heatmapToggle.addEventListener('change', (e) => {
+                        const visible = e.target.checked;
+                        heatmapActors.forEach(actor => actor.setVisibility(visible));
+                        heatmapControls.style.display = visible ? 'flex' : 'none';
+                        // Force re-render
+                        allRenderWindows.forEach(rw => rw.getRenderWindow().render());
+                    });
 
-            // This function sets up the entire heatmap panel
-            async function setupHeatmap() {
-                const heatmapContainer = document.getElementById('heatmapContainer');
-                if (!config.heatmapUrl) {
-                    heatmapContainer.innerHTML = '<p class="text-info p-3">No heatmap available for this series.</p>';
-                    return;
+                    opacitySlider.addEventListener('input', (e) => {
+                        const opacity = parseFloat(e.target.value);
+                        heatmapActors.forEach(actor => actor.getProperty().setOpacity(opacity));
+                        allRenderWindows.forEach(rw => rw.getRenderWindow().render());
+                    });
+                } else {
+                    // Disable toggle if no heatmap
+                    heatmapToggle.disabled = true;
+                    heatmapToggle.parentElement.title = "No heatmap available";
                 }
-
-                // 1. Create the renderer and window for the heatmap panel
-                heatmap.renWin = vtkGenericRenderWindow.newInstance({ background: [0, 0, 0] });
-                heatmap.renWin.setContainer(heatmapContainer);
-                allRenderWindows.push(heatmap.renWin);
-                const renderer = heatmap.renWin.getRenderer();
-                const camera = renderer.getActiveCamera();
-                camera.setParallelProjection(true);
-
-                // 2. Setup the base DICOM layer (greyscale)
-                heatmap.baseMapper = vtkImageMapper.newInstance();
-                heatmap.baseMapper.setInputData(imageData);
-                const baseSlice = vtkImageSlice.newInstance();
-                baseSlice.setMapper(heatmap.baseMapper);
-                renderer.addActor(baseSlice);
-
-                // 3. Load the heatmap .vti data and set it up as an overlay layer
-                const heatmapFileContents = await HttpDataAccessHelper.fetchBinary(config.heatmapUrl);
-                const heatmapReader = vtkXMLImageDataReader.newInstance();
-                heatmapReader.parseAsArrayBuffer(heatmapFileContents);
-                const heatmapData = heatmapReader.getOutputData(0);
-
-                heatmap.heatmapMapper = vtkImageMapper.newInstance();
-                heatmap.heatmapMapper.setInputData(heatmapData);
-                heatmap.heatmapActor = vtkImageSlice.newInstance();
-                heatmap.heatmapActor.setMapper(heatmap.heatmapMapper);
-                renderer.addActor(heatmap.heatmapActor);
-
-                // 4. Create color (jet colormap) and opacity functions for the heatmap
-                const heatmapCtfun = vtkColorTransferFunction.newInstance();
-                heatmapCtfun.addRGBPoint(0, 0, 0, 1);     // Blue
-                heatmapCtfun.addRGBPoint(0.5, 1, 1, 0);   // Yellow
-                heatmapCtfun.addRGBPoint(1.0, 1, 0, 0);   // Red
-
-                const heatmapOfun = vtkPiecewiseFunction.newInstance();
-                heatmapOfun.addPoint(0, 0.0);    // Make low values transparent
-                heatmapOfun.addPoint(0.2, 0.0);
-                heatmapOfun.addPoint(1.0, 0.5);  // Make high values semi-transparent
-                
-                heatmap.heatmapActor.getProperty().setRGBTransferFunction(heatmapCtfun);
-                heatmap.heatmapActor.getProperty().setScalarOpacity(heatmapOfun);
-                
-                // 5. Connect the HTML controls (dropdown and sliders) to the heatmap view
-                const viewSelector = document.getElementById('heatmapViewSelector');
-                const windowSlider = document.getElementById('windowSlider');
-                const levelSlider = document.getElementById('levelSlider');
-                const opacitySlider = document.getElementById('opacitySlider');
-
-                function setHeatmapView(axis) {
-                    heatmap.currentAxis = parseInt(axis, 10);
-                    heatmap.baseMapper.setSlicingMode(heatmap.currentAxis);
-                    heatmap.heatmapMapper.setSlicingMode(heatmap.currentAxis);
-                    updateHeatmapSlice();
-                    renderer.resetCamera();
-                    renderer.resetCameraClippingRange();
-                }
-
-                viewSelector.addEventListener('change', (e) => setHeatmapView(e.target.value));
-                
-                windowSlider.addEventListener('input', (e) => {
-                    baseSlice.getProperty().setColorWindow(parseFloat(e.target.value));
-                    heatmap.renWin.getRenderWindow().render();
-                });
-                levelSlider.addEventListener('input', (e) => {
-                    baseSlice.getProperty().setColorLevel(parseFloat(e.target.value));
-                    heatmap.renWin.getRenderWindow().render();
-                });
-                opacitySlider.addEventListener('input', (e) => {
-                    heatmap.heatmapActor.getProperty().setOpacity(parseFloat(e.target.value));
-                    heatmap.renWin.getRenderWindow().render();
-                });
-                
-                // Set initial values from the sliders
-                baseSlice.getProperty().setColorWindow(parseFloat(windowSlider.value));
-                baseSlice.getProperty().setColorLevel(parseFloat(levelSlider.value));
-                heatmap.heatmapActor.getProperty().setOpacity(parseFloat(opacitySlider.value));
-
-                // Initialize the view
-                setHeatmapView(viewSelector.value);
+            } else {
+                console.warn("Heatmap controls not found in DOM. Skipping event listeners.");
             }
-            
-            await setupHeatmap();
-            // --- END OF HEATMAP IMPLEMENTATION ---
 
             resetButton.addEventListener('click', resetViews);
-            resetViews(); 
+            resetViews();
 
             loadingOverlay.style.display = 'none';
             allRenderWindows.forEach(r => r.resize());
@@ -323,10 +307,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (eceProbability !== null && document.getElementById('probabilityChart')) {
             const ctx = document.getElementById('probabilityChart').getContext('2d');
             const nonEceProbability = 1.0 - eceProbability;
-            new Chart(ctx, { type: 'bar', data: { labels: ['ECE', 'Non-ECE'], datasets: [{ data: [eceProbability, nonEceProbability], backgroundColor: [ 'rgba(217, 83, 79, 0.7)', 'rgba(91, 192, 222, 0.7)' ], borderColor: [ 'rgba(217, 83, 79, 1)', 'rgba(91, 192, 222, 1)' ], borderWidth: 1, barPercentage: 0.6, categoryPercentage: 0.7 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Prediction Probability' }, datalabels: { display: true, color: 'black', font: { weight: 'bold' }, anchor: 'end', align: 'end', formatter: (value) => `${(value * 100).toFixed(1)}%` } }, scales: { x: { beginAtZero: true, max: 1.0, title: { display: true, text: 'Probability Score' } }, y: { grid: { display: false } } } } });
+            new Chart(ctx, { type: 'bar', data: { labels: ['ECE', 'Non-ECE'], datasets: [{ data: [eceProbability, nonEceProbability], backgroundColor: ['rgba(217, 83, 79, 0.7)', 'rgba(91, 192, 222, 0.7)'], borderColor: ['rgba(217, 83, 79, 1)', 'rgba(91, 192, 222, 1)'], borderWidth: 1, barPercentage: 0.6, categoryPercentage: 0.7 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Prediction Probability' }, datalabels: { display: true, color: 'black', font: { weight: 'bold' }, anchor: 'end', align: 'end', formatter: (value) => `${(value * 100).toFixed(1)}%` } }, scales: { x: { beginAtZero: true, max: 1.0, title: { display: true, text: 'Probability Score' } }, y: { grid: { display: false } } } } });
         }
     }
-    
+
     setupVtk();
     setupChart();
 });

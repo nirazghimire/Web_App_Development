@@ -2,7 +2,8 @@ import os
 import numpy as np
 import pydicom
 from skimage.transform import resize
-from tensorflow.keras.models import load_model
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.layers import Input, Conv3D, MaxPooling3D, Dense, GlobalAveragePooling3D, Dropout, Activation
 import uuid
 from django.conf import settings
 import matplotlib.pyplot as plt
@@ -241,6 +242,48 @@ def generate_all_directional_slices(dicom_folder, output_folder, user_id, series
             plt.imsave(full_path, img, cmap='gray')
 
 
+def get_model(input_shape=(90, 90, 25, 1), num_classes=2):
+    """
+    Defines the 3D CNN model architecture, loads weights from a checkpoint, 
+    and returns the compiled model.
+    """
+    
+    # --- Define Model Architecture ---
+    i = Input(shape=input_shape)
+    
+    # Block 1
+    x = Conv3D(32, (3, 3, 3), activation='relu', padding='same', name='conv3d_1')(i)
+    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_1')(x)
+    
+    # Block 2
+    x = Conv3D(64, (3, 3, 3), activation='relu', padding='same', name='conv3d_2')(x)
+    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_2')(x)
+    
+    # Block 3
+    x = Conv3D(128, (3, 3, 3), activation='relu', padding='same', name='conv3d_3')(x)
+    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_3')(x)
+
+    # Global Average Pooling and Dense Layers
+    x = GlobalAveragePooling3D(name='global_avg_pool')(x)
+    x = Dense(256, activation='relu', name='dense_1')(x)
+    x = Dropout(0.3, name='dropout_1')(x)
+    x = Dense(num_classes, name='dense_output')(x)
+    x = Activation('softmax', name='activation_softmax')(x)
+    
+    model = Model(inputs=i, outputs=x)
+    
+    # --- Load Weights from Checkpoint ---
+    checkpoint_dir = os.path.join(settings.BASE_DIR, 'dicom_processor', 'checkpoint_v2_1')
+    latest_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
+    
+    if latest_checkpoint:
+        print(f"--- Loading weights from checkpoint: {latest_checkpoint} ---")
+        model.load_weights(latest_checkpoint)
+    else:
+        raise FileNotFoundError("No model checkpoint found. Aborting heatmap generation.")
+
+    return model
+
 def generate_heatmap(dicom_directory):
     """
     Generates a Grad-CAM style heatmap, saves it directly as a .vti file,
@@ -248,30 +291,46 @@ def generate_heatmap(dicom_directory):
     """
     print("--- Starting generate_heatmap ---")
     
-    # --- Part 1: Load and Prepare Volume (Same as before) ---
-    volume = create_volume_from_dicom(dicom_directory)
+    # --- Part 1: Load and Prepare Volume ---
+    # Use load_scan_as_3d_volume to get volume, spacing, and origin
+    try:
+        volume, voxel_spacing, origin = load_scan_as_3d_volume(dicom_directory)
+    except Exception as e:
+        print(f"Error loading volume: {e}")
+        return None, None
+
     if volume is None or volume.size == 0:
         return None, None 
 
-    original_shape = volume.shape # (depth, height, width)
+    # volume shape is (depth, height, width) -> (z, y, x)
+    # We need to transpose it to (width, height, depth) -> (x, y, z) for processing
+    original_shape = volume.shape 
     volume_transposed = np.transpose(volume, (2, 1, 0)) # (width, height, depth)
     
+    # Resize for model input
     correct_shape = (90, 90, 25)
     resized_volume = resize(volume_transposed, correct_shape, anti_aliasing=True)
     
     input_vol_for_model = np.expand_dims(resized_volume, axis=(0, -1))
 
     # --- Part 2: Load Model and Get Prediction (Same as before) ---
-    model_path = os.path.join(settings.BASE_DIR, 'dicom_processor', 'checkpoint_v2_1', 'weights-improvement_v2_1.keras')
-    if not os.path.exists(model_path):
-        return None, None
-    try:
-        model = load_model(model_path)
-    except Exception as e:
-        print(f"!!! ERROR loading Keras model: {e}")
+    model = get_model()
+    if model is None:
+        print("!!! ERROR: Failed to get the model. Aborting heatmap generation. !!!")
         return None, None
 
-    last_conv_layer_name = "activation_41"
+    # --- Dynamically find the last convolutional layer ---
+    last_conv_layer_name = None
+    for layer in reversed(model.layers):
+        if isinstance(layer, Conv3D):
+            last_conv_layer_name = layer.name
+            break
+            
+    if last_conv_layer_name is None:
+        print("!!! ERROR: Could not find a Conv3D layer in the model. !!!")
+        return None, None
+    print(f"--- Using last convolutional layer for Grad-CAM: {last_conv_layer_name} ---")
+
     grad_model = tf.keras.models.Model(
         [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
     )
@@ -296,19 +355,87 @@ def generate_heatmap(dicom_directory):
     if np.max(heatmap_np) > 0:
         heatmap_np = heatmap_np / np.max(heatmap_np)
     
-    # --- Part 4: NEW - Save Heatmap Directly to VTI ---
-    # Resize heatmap back to the original volume dimensions
-    # IMPORTANT: The shape for resize needs to match the transposed volume
-    heatmap_resized_np = resize(heatmap_np, volume_transposed.shape, anti_aliasing=True)
+    # --- OPTIMIZATION: Convert to Uint8 to save space ---
+    heatmap_uint8_np = (heatmap_np * 255).astype(np.uint8)
+
+    # --- Part 4: Resize and Save Heatmap Directly to VTI ---
+    # We want the heatmap to match the original volume's physical space.
+    # The original volume (transposed) has shape (width, height, depth).
+    # We will resize the heatmap to a scaled version of this, but keep the aspect ratio.
     
-    # The data needs to be in Fortran-contiguous order for VTK
-    heatmap_final_np = np.ascontiguousarray(heatmap_resized_np.transpose(2, 1, 0))
+    original_dims = volume_transposed.shape # (x, y, z)
+    max_xy_dim = max(original_dims[0], original_dims[1])
     
-    # Convert numpy array to VTK image data
-    vtk_data_array = numpy_to_vtk(num_array=heatmap_final_np.ravel(), deep=True, array_type=vtk.VTK_FLOAT)
+    scale = 1.0
+    if max_xy_dim > 256: # Cap at 256 for performance
+        scale = 256.0 / max_xy_dim
+        
+    new_dims = (
+        int(original_dims[0] * scale),
+        int(original_dims[1] * scale),
+        original_dims[2] # Keep original depth
+    )
+    
+    print(f"--- Resizing heatmap from {heatmap_uint8_np.shape} to {new_dims} ---")
+    # Use preserve_range=True for integer-based resizing
+    heatmap_resized_np = resize(heatmap_uint8_np, new_dims, anti_aliasing=True, preserve_range=True)
+    
+    # The resize function might return float, convert back to uint8
+    heatmap_final_np = heatmap_resized_np.astype(np.uint8)
+    
+    # IMPORTANT: VTK expects data in (x, y, z) order for StructuredPoints/ImageData,
+    # but the numpy array layout in memory should be such that when raveled, it matches VTK's expectation.
+    # VTK iterates x fastest, then y, then z.
+    # Numpy defaults to C-order (z, y, x) if we think of indices as [z][y][x].
+    # However, our volume_transposed is (x, y, z).
+    # To make it compatible with VTK's flat array expectation (x, y, z), we need to ensure the memory layout is correct.
+    # Actually, if we have (width, height, depth) in numpy, and we want x to be fastest, we should transpose to (depth, height, width) (z, y, x)
+    # and then flatten? No, wait.
+    # VTK Image Data:
+    # Index = x + y*dims[0] + z*dims[0]*dims[1]
+    # This corresponds to Fortran order if we have (x, y, z) array.
+    # Or C order if we have (z, y, x) array.
+    # Our heatmap_final_np is currently (x, y, z).
+    # So we should transpose it to (z, y, x) before flattening (ravel) if we use default C-order ravel.
+    
+    heatmap_for_vtk = np.transpose(heatmap_final_np, (2, 1, 0)) # (z, y, x)
+    heatmap_for_vtk = np.ascontiguousarray(heatmap_for_vtk)
+    
+    # Verify size
+    expected_size = new_dims[0] * new_dims[1] * new_dims[2]
+    actual_size = heatmap_for_vtk.size
+    print(f"--- VTI Data Check: Expected Size={expected_size}, Actual Size={actual_size} ---")
+    
+    if expected_size != actual_size:
+        print(f"!!! ERROR: Data size mismatch! Resizing failed to produce correct shape. !!!")
+        # Fallback or error handling?
+        # Let's try to force resize to exact shape if needed, but resize() should handle it.
+        # If mismatch, we might have an issue with new_dims calculation vs resize output.
+        # resize output shape is determined by new_dims passed to it.
+        pass
+
+    # --- Use VTK_UNSIGNED_CHAR for the 8-bit data ---
+    vtk_data_array = numpy_to_vtk(num_array=heatmap_for_vtk.ravel(), deep=True, array_type=vtk.VTK_UNSIGNED_CHAR)
     
     vtk_image_data = vtk.vtkImageData()
-    vtk_image_data.SetDimensions(heatmap_final_np.shape)
+    # SetDimensions takes (x, y, z)
+    vtk_image_data.SetDimensions(new_dims) 
+    
+    # Calculate Spacing
+    # Original voxel spacing is [col_spacing, row_spacing, slice_thickness] -> [x_spacing, y_spacing, z_spacing]
+    # We scaled x and y by 'scale'. So the new spacing should be original_spacing / scale.
+    # Z spacing remains the same.
+    
+    new_spacing = [
+        voxel_spacing[0] / scale,
+        voxel_spacing[1] / scale,
+        voxel_spacing[2]
+    ]
+    vtk_image_data.SetSpacing(new_spacing)
+    
+    # Set Origin
+    vtk_image_data.SetOrigin(origin)
+    
     vtk_image_data.GetPointData().SetScalars(vtk_data_array)
     
     # Prepare output path
@@ -418,12 +545,24 @@ def load_scan_as_3d_volume(dicom_series_directory_path):
     # Stack the slices into a 3D numpy array
     try:
         volume = np.stack(slices_data, axis=0)  # shape (rows, cols, slices)
+        
+        # Extract Origin (ImagePositionPatient) from the first slice
+        origin = [0.0, 0.0, 0.0]
+        if slice_objects:
+            first_slice = slice_objects[0]
+            ipp = first_slice.get("ImagePositionPatient", None)
+            if ipp:
+                origin = [float(ipp[0]), float(ipp[1]), float(ipp[2])]
+                print(f"Origin found: {origin}")
+            else:
+                print("Warning: ImagePositionPatient not found, using default origin [0.0, 0.0, 0.0]")
+        
         print(f"Successfully stacked {len(slices_data)} as 3D volume with shape: {volume.shape}")
-        return volume, voxel_spacing
+        return volume, voxel_spacing, origin
     except ValueError as e:
         print(f"Error stacking slices into a 3D volume: {e}")
         raise ValueError(f"Error stacking slices into a 3D volume: {e}")
-        return None, None
+        return None, None, None
     
 
 def get_slice_from_volume_and_save_png(volume_3d, view_orientation, slice_index, 

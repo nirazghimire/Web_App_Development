@@ -106,28 +106,41 @@ def delete_dicom(request, series_id):
 def process_dicom(request, series_id):
     series = get_object_or_404(DicomSeries, id=series_id, user=request.user)
     if request.method == 'POST':
-        print(f"--- Starting processing for Series ID: {series.id} ---")
-        heatmap_vti_file_path, prediction_score = generate_heatmap(series.file_path)
-        ece_prob = prediction_score if prediction_score is not None else 0.0
-        nrrd_dir = os.path.join(settings.MEDIA_ROOT, "nrrd_files")
-        os.makedirs(nrrd_dir, exist_ok=True)
-        nrrd_path = os.path.join(nrrd_dir, f"user{series.user.id}_series{series.id}.nrrd")
-        convert_dicom_series_to_nrrd(series.file_path, nrrd_path)
-        volume, _ = load_scan_as_3d_volume(series.file_path)
-        slice_counts = {'axial': volume.shape[0], 'coronal': volume.shape[1], 'sagittal': volume.shape[2]} if volume is not None else {}
-        ProcessingResult.objects.update_or_create(
-            dicom_series=series,
-            defaults={
-                'result_type': 'heatmap_and_prediction',
-                'heatmap_vti_path': heatmap_vti_file_path,
-                'nrrd_file_path': nrrd_path,
-                'ece_probability': ece_prob,
-                'non_ece_probability': 1.0 - ece_prob,
-                'slice_counts_json': json.dumps(slice_counts)
-            }
-        )
-        messages.success(request, f"Processing complete for '{series.name}'.")
-        return redirect('dashboard_series_view', series_id=series.id)
+        try:
+            print(f"--- Starting processing for Series ID: {series.id} ---")
+            heatmap_vti_file_path, prediction_score = generate_heatmap(series.file_path)
+            ece_prob = prediction_score if prediction_score is not None else 0.0
+            
+            nrrd_dir = os.path.join(settings.MEDIA_ROOT, "nrrd_files")
+            os.makedirs(nrrd_dir, exist_ok=True)
+            nrrd_path = os.path.join(nrrd_dir, f"user{series.user.id}_series{series.id}.nrrd")
+            convert_dicom_series_to_nrrd(series.file_path, nrrd_path)
+            
+            volume, _, _ = load_scan_as_3d_volume(series.file_path)
+            slice_counts = {'axial': volume.shape[0], 'coronal': volume.shape[1], 'sagittal': volume.shape[2]} if volume is not None else {}
+            
+            ProcessingResult.objects.update_or_create(
+                dicom_series=series,
+                defaults={
+                    'result_type': 'heatmap_and_prediction',
+                    'heatmap_vti_path': heatmap_vti_file_path,
+                    'nrrd_file_path': nrrd_path,
+                    'ece_probability': ece_prob,
+                    'non_ece_probability': 1.0 - ece_prob,
+                    'slice_counts_json': json.dumps(slice_counts)
+                }
+            )
+            messages.success(request, f"Processing complete for '{series.name}'.")
+            return redirect('dicom_processor:dashboard_series_view', series_id=series.id)
+        
+        except FileNotFoundError as e:
+            messages.error(request, f"Processing failed: {e}")
+            return redirect('dicom_processor:process_dicom', series_id=series.id)
+        
+        except Exception as e:
+            messages.error(request, f"An unexpected error occurred during processing: {e}")
+            return redirect('dicom_processor:process_dicom', series_id=series.id)
+
     latest_result = ProcessingResult.objects.filter(dicom_series=series).first()
     return render(request, 'dicom_processor/process.html', {'series': series, 'latest_result': latest_result})
 

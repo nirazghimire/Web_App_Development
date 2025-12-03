@@ -16,17 +16,17 @@
 
                 <div class="d-flex gap-2">
                     <!-- Process button -->
-                    <a href="{% url 'process_dicom' series.id %}" class="btn btn-sm btn-outline-warning">
+                    <a href="{% url 'dicom_processor:process_dicom' series.id %}" class="btn btn-sm btn-outline-warning">
                         Process
                     </a>
 
                     <!-- View button -->
-                    <a href="{% url 'dashboard_series_view' series.id %}" class="btn btn-sm btn-outline-success">
+                    <a href="{% url 'dicom_processor:dashboard_series_view' series.id %}" class="btn btn-sm btn-outline-success">
                         View Dashboard
                     </a>
 
                     <!-- Delete button with confirmation -->
-                    <form method="post" action="{% url 'delete_dicom' series.id %}" style="display:inline;"
+                    <form method="post" action="{% url 'dicom_processor:delete_dicom' series.id %}" style="display:inline;"
                           onsubmit="return confirm('Are you sure you want to delete &quot;{{ series.name }}&quot; DICOM series?');">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-sm btn-outline-danger">

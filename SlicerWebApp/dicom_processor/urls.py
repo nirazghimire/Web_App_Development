@@ -3,6 +3,8 @@
 from django.urls import path
 from . import views
 
+app_name = 'dicom_processor'  # Add this line
+
 urlpatterns = [
     # Main page routes
     path('', views.home, name='home'),

@@ -2,7 +2,7 @@
 {% load static %}
 
 {% block title %}
-    Dashboard - {{ series.name|default:"Viewer" }}
+Dashboard - {{ series.name|default:"Viewer" }}
 {% endblock %}
 
 {% block content %}
@@ -24,11 +24,17 @@
         </div>
     </div>
     <div class="row g-2 flex-grow-1" style="position: relative;">
-        <div class="col-lg-8 d-flex flex-column">
+        <div class="col-lg-12 d-flex flex-column">
             <div class="row g-2 h-50 pb-1">
                 <div class="col-6 d-flex flex-column">
                     <div class="viewer-container">
-                        <div class="viewer-header">3D View</div>
+                        <div class="viewer-header d-flex justify-content-between align-items-center">
+                            <span>3D View</span>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="heatmapToggle">
+                                <label class="form-check-label text-light small" for="heatmapToggle">Heatmap</label>
+                            </div>
+                        </div>
                         <div class="viewer-box" id="view3D"></div>
                     </div>
                 </div>
@@ -56,7 +62,15 @@
                 </div>
                 <div class="col-6 d-flex flex-column">
                     <div class="viewer-container">
-                        <div class="viewer-header">Coronal</div>
+                        <div class="viewer-header d-flex justify-content-between align-items-center">
+                            <span>Coronal</span>
+                            <div class="d-flex align-items-center gap-2" id="heatmapControls"
+                                style="display: none !important;">
+                                <label for="opacitySlider" class="small text-light mb-0">Opacity</label>
+                                <input type="range" class="form-range" id="opacitySlider" min="0" max="1" step="0.05"
+                                    value="0.5" style="width: 60px;">
+                            </div>
+                        </div>
                         <div class="viewer-box" id="viewCoronal"></div>
                         <div class="viewer-footer">
                             <input type="range" class="form-range" id="coronalSlider" min="0" value="0">
@@ -67,60 +81,6 @@
             </div>
         </div>
 
-        <div class="col-lg-4 d-flex flex-column">
-            <div class="card d-flex flex-column mb-2 heatmap-flex-card" style="min-height: 0;">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span>Heatmap</span>
-                    <select id="heatmapViewSelector" class="form-select form-select-sm" style="width: auto;">
-                        <option value="2" selected>Axial</option>
-                        <option value="1">Coronal</option>
-                        <option value="0">Sagittal</option>
-                    </select>
-                </div>
-                <div id="heatmapContainer" class="flex-grow-1" style="position: relative; overflow: hidden; background-color: #000;"></div>
-                <div class="card-footer bg-light p-2">
-                    <div class="row g-2 align-items-center">
-                        <div class="col-3"><label for="windowSlider" class="form-label mb-0 small">Window</label></div>
-                        <div class="col-9"><input type="range" class="form-range" id="windowSlider" min="1" max="2000" value="1000"></div>
-                    </div>
-                    <div class="row g-2 align-items-center">
-                        <div class="col-3"><label for="levelSlider" class="form-label mb-0 small">Level</label></div>
-                        <div class="col-9"><input type="range" class="form-range" id="levelSlider" min="-500" max="1500" value="500"></div>
-                    </div>
-                    <div class="row g-2 align-items-center mt-1">
-                        <div class="col-3"><label for="opacitySlider" class="form-label mb-0 small">Opacity</label></div>
-                        <div class="col-9"><input type="range" class="form-range" id="opacitySlider" min="0" max="1" step="0.05" value="0.4"></div>
-                    </div>
-                </div>
-                <div class="card-footer bg-light p-2">
-                    <div class="row g-2 align-items-center">
-                        <div class="col-3"><label for="axialSlider" class="form-label mb-0 small">Axial</label></div>
-                        <div class="col-7"><input type="range" class="form-range" id="axialSlider" min="0" value="0"></div>
-                        <div class="col-2 text-end"><span id="axialSliceLabel" class="small text-muted">0</span></div>
-                    </div>
-                    <div class="row g-2 align-items-center mt-1">
-                        <div class="col-3"><label for="sagittalSlider" class="form-label mb-0 small">Sagittal</label></div>
-                        <div class="col-7"><input type="range" class="form-range" id="sagittalSlider" min="0" value="0"></div>
-                        <div class="col-2 text-end"><span id="sagittalSliceLabel" class="small text-muted">0</span></div>
-                    </div>
-                    <div class="row g-2 align-items-center mt-1">
-                        <div class="col-3"><label for="coronalSlider" class="form-label mb-0 small">Coronal</label></div>
-                        <div class="col-7"><input type="range" class="form-range" id="coronalSlider" min="0" value="0"></div>
-                        <div class="col-2 text-end"><span id="coronalSliceLabel" class="small text-muted">0</span></div>
-                    </div>
-                </div>
-            </div>
-
-            {% if ece_probability is not None %}
-            <div class="card probability-flex-card">
-                <div class="card-header">Probability</div>
-                <div class="card-body">
-                    <canvas id="probabilityChart"></canvas>
-                </div>
-            </div>
-            {% endif %}
-        </div>
-        
         <div id="loadingOverlay" style="display: flex;">
             <div id="loadingMessage" class="text-light">
                 <div class="spinner-border me-3" role="status"></div>
@@ -134,17 +94,102 @@
 {% block styles %}
 {{ block.super }}
 <style>
-    .vh-100 { height: 90vh; }
-    .viewer-container { width: 100%; height: 100%; display: flex; flex-direction: column; background-color: #000; border: 1px solid #495057; border-radius: 0.25rem; position: relative; }
-    .viewer-header { text-align: center; color: #f8f9fa; padding: 4px; background-color: #343a40; font-size: 0.9em; font-weight: bold; }
-    .viewer-box { flex-grow: 1; position: relative; overflow: hidden; min-height: 200px; }
-    #loadingOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); display: flex; justify-content: center; align-items: center; z-index: 1000; color: white; font-size: 1.2rem; border-radius: 0.25rem; }
-    .form-range { padding: 0; -webkit-appearance: none; appearance: none; width: 100%; height: 6px; background: #dee2e6; border-radius: 3px; outline: none; }
-    .form-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; background: #0d6efd; border-radius: 50%; cursor: pointer; margin-top: -5px; }
-    .form-range::-moz-range-thumb { width: 16px; height: 16px; background: #0d6efd; border-radius: 50%; cursor: pointer; border: none; }
-    .form-range::-moz-range-track { width: 100%; height: 6px; background: #dee2e6; border-radius: 3px; border: none; }
-    .heatmap-flex-card { flex: 1 1 auto; display: flex; flex-direction: column; }
-    .probability-flex-card { flex: 0 0 250px; }
+    .vh-100 {
+        height: 90vh;
+    }
+
+    .viewer-container {
+        width: 100%;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+        background-color: #000;
+        border: 1px solid #495057;
+        border-radius: 0.25rem;
+        position: relative;
+    }
+
+    .viewer-header {
+        text-align: center;
+        color: #f8f9fa;
+        padding: 4px;
+        background-color: #343a40;
+        font-size: 0.9em;
+        font-weight: bold;
+    }
+
+    .viewer-box {
+        flex-grow: 1;
+        position: relative;
+        overflow: hidden;
+        min-height: 200px;
+    }
+
+    #loadingOverlay {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.85);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 1000;
+        color: white;
+        font-size: 1.2rem;
+        border-radius: 0.25rem;
+    }
+
+    .form-range {
+        padding: 0;
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
+        height: 6px;
+        background: #dee2e6;
+        border-radius: 3px;
+        outline: none;
+    }
+
+    .form-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 16px;
+        height: 16px;
+        background: #0d6efd;
+        border-radius: 50%;
+        cursor: pointer;
+        margin-top: -5px;
+    }
+
+    .form-range::-moz-range-thumb {
+        width: 16px;
+        height: 16px;
+        background: #0d6efd;
+        border-radius: 50%;
+        cursor: pointer;
+        border: none;
+    }
+
+    .form-range::-moz-range-track {
+        width: 100%;
+        height: 6px;
+        background: #dee2e6;
+        border-radius: 3px;
+        border: none;
+    }
+
+    .heatmap-flex-card {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .probability-flex-card {
+        flex: 0 0 250px;
+    }
+
     .viewer-footer {
         display: flex;
         align-items: center;
@@ -152,9 +197,11 @@
         padding: 4px 8px;
         background-color: #343a40;
     }
+
     .viewer-footer .form-range {
         flex-grow: 1;
     }
+
     .viewer-footer .small {
         color: #f8f9fa !important;
         min-width: 25px;
@@ -169,8 +216,8 @@
 <script id="viewer-config" type="application/json">
 {
     "seriesId": {{ series.id|default:'null' }},
-    "volumeUrl": "{% if series %}{% url 'get_volume_url' series.id %}{% endif %}",
-    "heatmapUrl": "{% if series.processing_result.heatmap_vti_path %}{% url 'get_heatmap_url' series.id %}{% endif %}",
+    "volumeUrl": "{% if series %}{% url 'dicom_processor:get_volume_url' series.id %}{% endif %}",
+    "heatmapUrl": "{% if series.processing_result.heatmap_vti_path %}{% url 'dicom_processor:get_heatmap_url' series.id %}{% endif %}",
     "eceProbability": {{ ece_probability|default:'null' }}
 }
 </script>
