@@ -2,7 +2,7 @@
 
 A powerful, web-based platform for managing, viewing, and analyzing medical imaging data (DICOM). This application integrates advanced 3D visualization with AI-powered analysis to assist researchers and clinicians in interpreting medical scans.
 
-![Dashboard Preview](https://via.placeholder.com/800x450?text=Medical+Imaging+Dashboard+Preview)
+![Dashboard Preview](docs/assets/dashboard_preview.png)
 *(Replace with actual screenshot)*
 
 ## 🚀 Key Features
