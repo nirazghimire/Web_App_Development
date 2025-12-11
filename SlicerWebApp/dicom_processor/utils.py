@@ -286,40 +286,56 @@ def get_model(input_shape=(90, 90, 25, 1), num_classes=2):
 
 def generate_heatmap(dicom_directory):
     """
-    Generates a Grad-CAM style heatmap, saves it directly as a .vti file,
-    and returns the model's prediction score.
+    Generates a Grad-CAM style heatmap using SimpleITK for robust geometry handling.
+    Saves as .vti and returns the path and prediction score.
     """
-    print("--- Starting generate_heatmap ---")
+    print(f"--- Starting generate_heatmap (SITK-based) for: {dicom_directory} ---")
     
-    # --- Part 1: Load and Prepare Volume ---
-    # Use load_scan_as_3d_volume to get volume, spacing, and origin
-    try:
-        volume, voxel_spacing, origin = load_scan_as_3d_volume(dicom_directory)
-    except Exception as e:
-        print(f"Error loading volume: {e}")
+    if not os.path.exists(dicom_directory):
+        print(f"Directory not found: {dicom_directory}")
         return None, None
 
-    if volume is None or volume.size == 0:
-        return None, None 
+    # --- Step 1: Read DICOM Series with SimpleITK ---
+    try:
+        reader = sitk.ImageSeriesReader()
+        dicom_names = reader.GetGDCMSeriesFileNames(dicom_directory)
+        reader.SetFileNames(dicom_names)
+        sitk_image = reader.Execute()
+        
+        # sitk_image is (Width, Height, Depth).
+        # GetArrayFromImage returns (Depth, Height, Width) -> (z, y, x)
+        volume_np = sitk.GetArrayFromImage(sitk_image)
+        print(f"Loaded Volume. SITK Size: {sitk_image.GetSize()}, Numpy Shape: {volume_np.shape}")
+        
+    except Exception as e:
+        print(f"Error reading DICOM with SimpleITK: {e}")
+        return None, None
 
-    # volume shape is (depth, height, width) -> (z, y, x)
-    # We need to transpose it to (width, height, depth) -> (x, y, z) for processing
-    original_shape = volume.shape 
-    volume_transposed = np.transpose(volume, (2, 1, 0)) # (width, height, depth)
+    if volume_np is None or volume_np.size == 0:
+        return None, None
+
+    # --- Step 2: Prepare for Model (Standardize Orientation) ---
+    # The model expects (90, 90, 25).
+    # We need to process the numpy array.
+    # Model trained on transposed data? 
+    # Original code: volume_transposed = np.transpose(volume, (2, 1, 0)) # (x, y, z)
+    # Then resized to (90, 90, 25).
+    #
+    # SITK Numpy array is (z, y, x).
+    # To get (x, y, z), we transpose (2, 1, 0).
+    volume_transposed = np.transpose(volume_np, (2, 1, 0)) # (x, y, z)
     
     # Resize for model input
     correct_shape = (90, 90, 25)
+    # Note: We resize the raw data just for inference.
     resized_volume = resize(volume_transposed, correct_shape, anti_aliasing=True)
-    
     input_vol_for_model = np.expand_dims(resized_volume, axis=(0, -1))
 
-    # --- Part 2: Load Model and Get Prediction (Same as before) ---
+    # --- Step 3: Model Inference ---
     model = get_model()
     if model is None:
-        print("!!! ERROR: Failed to get the model. Aborting heatmap generation. !!!")
         return None, None
 
-    # --- Dynamically find the last convolutional layer ---
     last_conv_layer_name = None
     for layer in reversed(model.layers):
         if isinstance(layer, Conv3D):
@@ -327,15 +343,13 @@ def generate_heatmap(dicom_directory):
             break
             
     if last_conv_layer_name is None:
-        print("!!! ERROR: Could not find a Conv3D layer in the model. !!!")
+        print("Error: No Conv3D layer found.")
         return None, None
-    print(f"--- Using last convolutional layer for Grad-CAM: {last_conv_layer_name} ---")
 
     grad_model = tf.keras.models.Model(
         [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
     )
 
-    # --- Part 3: Generate Heatmap as NumPy Array (Same as before) ---
     with tf.GradientTape() as tape:
         conv_output, preds = grad_model(input_vol_for_model)
         pred_index = tf.argmax(preds[0])
@@ -355,104 +369,113 @@ def generate_heatmap(dicom_directory):
     if np.max(heatmap_np) > 0:
         heatmap_np = heatmap_np / np.max(heatmap_np)
     
-    # --- OPTIMIZATION: Convert to Uint8 to save space ---
-    heatmap_uint8_np = (heatmap_np * 255).astype(np.uint8)
-
-    # --- Part 4: Resize and Save Heatmap Directly to VTI ---
-    # We want the heatmap to match the original volume's physical space.
-    # The original volume (transposed) has shape (width, height, depth).
-    # We will resize the heatmap to a scaled version of this, but keep the aspect ratio.
+    # --- Step 4: Create SITK Image for Heatmap and Resample ---
+    # heatmap_np is small (e.g. 11x11x3 or similar, depending on pooling).
+    # It corresponds to the 'correct_shape' (90, 90, 25) which is (x, y, z).
+    # Let's resize it back to (90, 90, 25) first?
+    # Or creating an SITK image with physical spacing?
     
-    original_dims = volume_transposed.shape # (x, y, z)
-    max_xy_dim = max(original_dims[0], original_dims[1])
+    # Let's treat heatmap_np as a volume covering the full physical extent.
+    # We will construct a SITK image from it.
+    # Current shape: (x_small, y_small, z_small).
+    # SITK expects (z, y, x) for GetImageFromArray.
+    heatmap_np_z_first = np.transpose(heatmap_np, (2, 1, 0)) 
+    sitk_heatmap_small = sitk.GetImageFromArray(heatmap_np_z_first)
     
-    scale = 1.0
-    if max_xy_dim > 256: # Cap at 256 for performance
-        scale = 256.0 / max_xy_dim
-        
-    new_dims = (
-        int(original_dims[0] * scale),
-        int(original_dims[1] * scale),
-        original_dims[2] # Keep original depth
-    )
+    # Set the small heatmap's physical bounds to match the original image.
+    # This effectively stretches it to cover the patient.
+    sitk_heatmap_small.SetOrigin(sitk_image.GetOrigin())
     
-    print(f"--- Resizing heatmap from {heatmap_uint8_np.shape} to {new_dims} ---")
-    # Use preserve_range=True for integer-based resizing
-    heatmap_resized_np = resize(heatmap_uint8_np, new_dims, anti_aliasing=True, preserve_range=True)
-    
-    # The resize function might return float, convert back to uint8
-    heatmap_final_np = heatmap_resized_np.astype(np.uint8)
-    
-    # IMPORTANT: VTK expects data in (x, y, z) order for StructuredPoints/ImageData,
-    # but the numpy array layout in memory should be such that when raveled, it matches VTK's expectation.
-    # VTK iterates x fastest, then y, then z.
-    # Numpy defaults to C-order (z, y, x) if we think of indices as [z][y][x].
-    # However, our volume_transposed is (x, y, z).
-    # To make it compatible with VTK's flat array expectation (x, y, z), we need to ensure the memory layout is correct.
-    # Actually, if we have (width, height, depth) in numpy, and we want x to be fastest, we should transpose to (depth, height, width) (z, y, x)
-    # and then flatten? No, wait.
-    # VTK Image Data:
-    # Index = x + y*dims[0] + z*dims[0]*dims[1]
-    # This corresponds to Fortran order if we have (x, y, z) array.
-    # Or C order if we have (z, y, x) array.
-    # Our heatmap_final_np is currently (x, y, z).
-    # So we should transpose it to (z, y, x) before flattening (ravel) if we use default C-order ravel.
-    
-    heatmap_for_vtk = np.transpose(heatmap_final_np, (2, 1, 0)) # (z, y, x)
-    heatmap_for_vtk = np.ascontiguousarray(heatmap_for_vtk)
-    
-    # Verify size
-    expected_size = new_dims[0] * new_dims[1] * new_dims[2]
-    actual_size = heatmap_for_vtk.size
-    print(f"--- VTI Data Check: Expected Size={expected_size}, Actual Size={actual_size} ---")
-    
-    if expected_size != actual_size:
-        print(f"!!! ERROR: Data size mismatch! Resizing failed to produce correct shape. !!!")
-        # Fallback or error handling?
-        # Let's try to force resize to exact shape if needed, but resize() should handle it.
-        # If mismatch, we might have an issue with new_dims calculation vs resize output.
-        # resize output shape is determined by new_dims passed to it.
-        pass
-
-    # --- Use VTK_UNSIGNED_CHAR for the 8-bit data ---
-    vtk_data_array = numpy_to_vtk(num_array=heatmap_for_vtk.ravel(), deep=True, array_type=vtk.VTK_UNSIGNED_CHAR)
-    
-    vtk_image_data = vtk.vtkImageData()
-    # SetDimensions takes (x, y, z)
-    vtk_image_data.SetDimensions(new_dims) 
-    
-    # Calculate Spacing
-    # Original voxel spacing is [col_spacing, row_spacing, slice_thickness] -> [x_spacing, y_spacing, z_spacing]
-    # We scaled x and y by 'scale'. So the new spacing should be original_spacing / scale.
-    # Z spacing remains the same.
+    # Calculate spacing so it covers the same field of view
+    orig_size = sitk_image.GetSize() # (x, y, z)
+    orig_spacing = sitk_image.GetSpacing()
+    small_size = sitk_heatmap_small.GetSize()
     
     new_spacing = [
-        voxel_spacing[0] / scale,
-        voxel_spacing[1] / scale,
-        voxel_spacing[2]
+        (orig_size[0] * orig_spacing[0]) / small_size[0],
+        (orig_size[1] * orig_spacing[1]) / small_size[1],
+        (orig_size[2] * orig_spacing[2]) / small_size[2],
     ]
-    vtk_image_data.SetSpacing(new_spacing)
+    sitk_heatmap_small.SetSpacing(new_spacing)
+    sitk_heatmap_small.SetDirection(sitk_image.GetDirection())
     
-    # Set Origin
-    vtk_image_data.SetOrigin(origin)
+    # Now Resample it to match the original grid exactly.
+    # This gives us a 1:1 overlay with perfect alignment.
+    print("Resampling heatmap to match original resolution...")
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(sitk_image)
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetDefaultPixelValue(0)
     
-    vtk_image_data.GetPointData().SetScalars(vtk_data_array)
+    sitk_heatmap_resampled = resampler.Execute(sitk_heatmap_small)
+
+    # --- Step 4b: Apply Threshold Mask (Background Removal) ---
+    # Convert to standard numpy to apply mask
+    print("Applying Background Mask (Thresholding Air <-700 HU)...")
+    heatmap_arr = sitk.GetArrayFromImage(sitk_heatmap_resampled)
+    original_arr = sitk.GetArrayFromImage(sitk_image)
+
+    # Safety check for shape mismatch (should be identical due to resampling)
+    if heatmap_arr.shape == original_arr.shape:
+        # Mask out air
+        heatmap_arr[original_arr < -700] = 0
+        
+        # Copy back to SITK image
+        sitk_heatmap_masked = sitk.GetImageFromArray(heatmap_arr)
+        sitk_heatmap_masked.CopyInformation(sitk_heatmap_resampled)
+        sitk_heatmap_resampled = sitk_heatmap_masked
+    else:
+        print(f"Warning: Shape mismatch during masking. Heatmap: {heatmap_arr.shape}, Original: {original_arr.shape}. Skipping mask.")
     
-    # Prepare output path
+    # --- Step 5: Convert to VTK ---
+    # Convert to standard 0-255 uint8 range for visualization
+    rescale_filter = sitk.RescaleIntensityImageFilter()
+    rescale_filter.SetOutputMinimum(0)
+    rescale_filter.SetOutputMaximum(255)
+    sitk_heatmap_uint8 = rescale_filter.Execute(sitk_heatmap_resampled)
+    
+    # Get numpy array (z, y, x)
+    heatmap_final_np = sitk.GetArrayFromImage(sitk_heatmap_uint8)
+    heatmap_final_np = heatmap_final_np.astype(np.uint8)
+    
+    # For VTK, we need flat array.
+    # VTK ImageData with (x, y, z) dims expects data ordered such that x changes fastest.
+    # Numpy (z, y, x) flattened: z changes slowest, then y, then x.
+    # So iterating flat array: 
+    #   idx 0: (0,0,0)
+    #   idx 1: (0,0,1) -> x=1
+    #   ...
+    # This matches VTK's expectation if we SetDimensions(x, y, z).
+    
+    flat_data = heatmap_final_np.ravel()
+    
+    vtk_data_array = numpy_to_vtk(num_array=flat_data, deep=True, array_type=vtk.VTK_UNSIGNED_CHAR)
+    
+    vtk_img = vtk.vtkImageData()
+    dims = sitk_heatmap_uint8.GetSize() # (x, y, z)
+    vtk_img.SetDimensions(dims)
+    vtk_img.SetSpacing(sitk_heatmap_uint8.GetSpacing())
+    vtk_img.SetOrigin(sitk_heatmap_uint8.GetOrigin())
+    
+    # Crucial: Set Direction!
+    # VTK Python's SetDirectionMatrix takes a 3x3 matrix or flat 9 list
+    direction = sitk_heatmap_uint8.GetDirection() # flattening 9 elements tuple
+    vtk_img.SetDirectionMatrix(direction)
+    
+    vtk_img.GetPointData().SetScalars(vtk_data_array)
+    
+    # --- Step 6: Save VTI ---
     save_dir_name = str(uuid.uuid4())
     output_directory = os.path.join(settings.MEDIA_ROOT, 'heatmaps_vti', save_dir_name)
     os.makedirs(output_directory, exist_ok=True)
     heatmap_vti_path = os.path.join(output_directory, 'heatmap.vti')
     
-    # Write the VTI file
     writer = vtk.vtkXMLImageDataWriter()
     writer.SetFileName(heatmap_vti_path)
-    writer.SetInputData(vtk_image_data)
+    writer.SetInputData(vtk_img)
     writer.Write()
-
-    print(f"  -> Heatmap saved directly to VTI: {heatmap_vti_path}")
     
-    # The function now returns the path to the VTI file and the score
+    print(f"Heatmap (VTI) saved with SITK geometry to: {heatmap_vti_path}")
     return heatmap_vti_path, prediction_score_value
 
     

@@ -41,7 +41,12 @@ Dashboard - {{ series.name|default:"Viewer" }}
                 <div class="col-6 d-flex flex-column">
                     <div class="viewer-container">
                         <div class="viewer-header">Axial</div>
-                        <div class="viewer-box" id="viewAxial"></div>
+                        <div class="viewer-box" id="viewAxial">
+                            <span class="orientation-marker top">A</span>
+                            <span class="orientation-marker bottom">P</span>
+                            <span class="orientation-marker left">R</span>
+                            <span class="orientation-marker right">L</span>
+                        </div>
                         <div class="viewer-footer">
                             <input type="range" class="form-range" id="axialSlider" min="0" value="0">
                             <span id="axialSliceLabel" class="small">0</span>
@@ -53,7 +58,12 @@ Dashboard - {{ series.name|default:"Viewer" }}
                 <div class="col-6 d-flex flex-column">
                     <div class="viewer-container">
                         <div class="viewer-header">Sagittal</div>
-                        <div class="viewer-box" id="viewSagittal"></div>
+                        <div class="viewer-box" id="viewSagittal">
+                            <span class="orientation-marker top">S</span>
+                            <span class="orientation-marker bottom">I</span>
+                            <span class="orientation-marker left">A</span>
+                            <span class="orientation-marker right">P</span>
+                        </div>
                         <div class="viewer-footer">
                             <input type="range" class="form-range" id="sagittalSlider" min="0" value="0">
                             <span id="sagittalSliceLabel" class="small">0</span>
@@ -69,9 +79,30 @@ Dashboard - {{ series.name|default:"Viewer" }}
                                 <label for="opacitySlider" class="small text-light mb-0">Opacity</label>
                                 <input type="range" class="form-range" id="opacitySlider" min="0" max="1" step="0.05"
                                     value="0.5" style="width: 60px;">
+
+                                <!-- Heatmap Legend -->
+                                <div class="ms-2 border-start ps-2 d-flex align-items-center gap-2">
+                                    <span class="small text-light" style="font-size: 0.75rem;">Attention:</span>
+                                    <div class="d-flex flex-column">
+                                        <!-- Gradient matches Jet colormap: Transparent/Black -> Blue -> Cyan -> Green -> Yellow -> Red -->
+                                        <div
+                                            style="width: 80px; height: 8px; background: linear-gradient(to right, black, blue, cyan, green, yellow, red); border: 1px solid #6c757d; border-radius: 2px;">
+                                        </div>
+                                        <div class="d-flex justify-content-between w-100"
+                                            style="font-size: 0.6rem; color: #adb5bd; line-height: 1; margin-top: 1px;">
+                                            <span>Low</span>
+                                            <span>High</span>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                        <div class="viewer-box" id="viewCoronal"></div>
+                        <div class="viewer-box" id="viewCoronal">
+                            <span class="orientation-marker top">S</span>
+                            <span class="orientation-marker bottom">I</span>
+                            <span class="orientation-marker left">R</span>
+                            <span class="orientation-marker right">L</span>
+                        </div>
                         <div class="viewer-footer">
                             <input type="range" class="form-range" id="coronalSlider" min="0" value="0">
                             <span id="coronalSliceLabel" class="small">0</span>
@@ -207,11 +238,52 @@ Dashboard - {{ series.name|default:"Viewer" }}
         min-width: 25px;
         text-align: right;
     }
+
+    /* Orientation Markers */
+    .orientation-marker {
+        position: absolute;
+        color: lime;
+        /* Professional medical green */
+        font-weight: bold;
+        font-size: 1.2em;
+        z-index: 10;
+        pointer-events: none;
+        /* Let clicks pass through */
+        text-shadow: 1px 1px 0 #000;
+    }
+
+    .orientation-marker.top {
+        top: 5px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+
+    .orientation-marker.bottom {
+        bottom: 5px;
+        left: 50%;
+        transform: translateX(-50%);
+    }
+
+    .orientation-marker.left {
+        left: 5px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .orientation-marker.right {
+        right: 5px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
 </style>
 {% endblock %}
 
 {% block scripts %}
 {{ block.super }}
+
+<script>
+    // Helper to inject markers (Optional, but cleaner in HTML directly for now)
+</script>
 
 <script id="viewer-config" type="application/json">
 {
