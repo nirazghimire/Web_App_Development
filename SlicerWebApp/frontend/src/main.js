@@ -55,17 +55,21 @@ document.addEventListener('DOMContentLoaded', function () {
         // --- Heatmap Color Functions ---
         const heatmapCtfun = vtkColorTransferFunction.newInstance();
         // "Jet" / Rainbow colormap: Blue -> Cyan -> Green -> Yellow -> Red
-        heatmapCtfun.addRGBPoint(0, 0, 0, 0);       // Black/Transparent at 0
-        heatmapCtfun.addRGBPoint(10, 0.0, 0.0, 1.0); // Blue starts
-        heatmapCtfun.addRGBPoint(96, 0.0, 1.0, 1.0); // Cyan
-        heatmapCtfun.addRGBPoint(160, 0.0, 1.0, 0.0); // Green
-        heatmapCtfun.addRGBPoint(224, 1.0, 1.0, 0.0); // Yellow
-        heatmapCtfun.addRGBPoint(255, 1.0, 0.0, 0.0); // Red
+        // Optimized for medical imaging with better contrast
+        heatmapCtfun.addRGBPoint(0, 0, 0, 0);            // Black - no attention
+        heatmapCtfun.addRGBPoint(50, 0.0, 0.0, 0.8);     // Dark Blue
+        heatmapCtfun.addRGBPoint(100, 0.0, 0.5, 1.0);    // Cyan-Blue
+        heatmapCtfun.addRGBPoint(150, 0.0, 1.0, 0.5);    // Cyan-Green
+        heatmapCtfun.addRGBPoint(180, 0.5, 1.0, 0.0);    // Yellow-Green
+        heatmapCtfun.addRGBPoint(210, 1.0, 1.0, 0.0);    // Bright Yellow
+        heatmapCtfun.addRGBPoint(240, 1.0, 0.5, 0.0);    // Orange
+        heatmapCtfun.addRGBPoint(255, 1.0, 0.0, 0.0);    // Bright Red - highest attention
 
         const heatmapOfun = vtkPiecewiseFunction.newInstance();
-        heatmapOfun.addPoint(0, 0.0);
-        heatmapOfun.addPoint(10, 0.0);
-        heatmapOfun.addPoint(255, 0.5); // Default max opacity
+        heatmapOfun.addPoint(0, 0.0);         // Fully transparent at 0
+        heatmapOfun.addPoint(50, 0.1);        // Start to show
+        heatmapOfun.addPoint(150, 0.4);       // Medium opacity
+        heatmapOfun.addPoint(255, 0.6);       // Max opacity (default 50%)
 
         try {
             loadingMessage.querySelector('span').textContent = 'Requesting data...';
@@ -85,15 +89,32 @@ document.addEventListener('DOMContentLoaded', function () {
                     console.log('Fetching heatmap from URL:', config.heatmapUrl);
                     const hResponse = await fetch(config.heatmapUrl);
                     const hData = await hResponse.json();
-                    if (hData.success) {
+                    if (hData.success && hData.heatmap_url) {
                         const hFileContents = await HttpDataAccessHelper.fetchBinary(hData.heatmap_url);
                         const hReader = vtkXMLImageDataReader.newInstance();
                         hReader.parseAsArrayBuffer(hFileContents);
                         heatmapData = hReader.getOutputData(0);
-                        console.log('Heatmap loaded. Dimensions:', heatmapData.getDimensions());
+                        
+                        // Validate heatmap dimensions match original volume
+                        if (heatmapData) {
+                            const heatmapDims = heatmapData.getDimensions();
+                            const volumeDims = imageData.getDimensions();
+                            console.log('Heatmap loaded. Dimensions:', heatmapDims);
+                            console.log('Volume dimensions:', volumeDims);
+                            
+                            // Check for dimension mismatch
+                            if (heatmapDims[0] !== volumeDims[0] || 
+                                heatmapDims[1] !== volumeDims[1] || 
+                                heatmapDims[2] !== volumeDims[2]) {
+                                console.warn('Heatmap dimensions do not match volume dimensions. This may cause alignment issues.');
+                            }
+                        }
+                    } else {
+                        console.warn('Heatmap URL missing or request unsuccessful');
                     }
                 } catch (e) {
                     console.error("Failed to load heatmap:", e);
+                    // Continue without heatmap
                 }
             }
 
@@ -199,7 +220,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 }
             }
 
+            // --- SYNCHRONIZATION FLAG ---
+            // Prevents slider input events from triggering when values are updated programmatically
+            let isUpdatingSliders = false;
+
             function updateAllSlices(i, j, k) {
+                // Set flag to prevent slider input events
+                isUpdatingSliders = true;
+
                 // Update Base Mappers (keep existing)
                 if (sliceMappers[0] && i >= 0 && i < dims[0]) {
                     sliceMappers[0].setSlice(i);
@@ -229,6 +257,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     // rw.getRenderer().resetCameraClippingRange(); // Optional: might be too expensive to do every frame?
                     rw.getRenderWindow().render();
                 });
+
+                // Clear flag after updates are complete
+                isUpdatingSliders = false;
             }
 
             function resetViews() {
@@ -269,20 +300,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 // Heatmap Slice (Overlay)
                 if (heatmapData) {
-                    const hMapper = vtkImageMapper.newInstance();
-                    hMapper.setInputData(heatmapData);
-                    hMapper.setSlicingMode(viewConfig.axis);
-                    heatmapMappers[viewConfig.axis] = hMapper;
+                    try {
+                        const hMapper = vtkImageMapper.newInstance();
+                        hMapper.setInputData(heatmapData);
+                        hMapper.setSlicingMode(viewConfig.axis);
+                        heatmapMappers[viewConfig.axis] = hMapper;
 
-                    const hActor = vtkImageSlice.newInstance();
-                    hActor.setMapper(hMapper);
-                    hActor.getProperty().setRGBTransferFunction(heatmapCtfun);
-                    hActor.getProperty().setScalarOpacity(heatmapOfun);
-                    hActor.getProperty().setOpacity(0.5); // Initial opacity
-                    hActor.setVisibility(false); // Hidden by default
+                        const hActor = vtkImageSlice.newInstance();
+                        hActor.setMapper(hMapper);
+                        hActor.getProperty().setRGBTransferFunction(heatmapCtfun);
+                        hActor.getProperty().setScalarOpacity(heatmapOfun);
+                        hActor.getProperty().setOpacity(0.5); // Initial opacity (50%)
+                        hActor.setVisibility(false); // Hidden by default
 
-                    renderer.addActor(hActor);
-                    heatmapActors.push(hActor);
+                        renderer.addActor(hActor);
+                        heatmapActors.push(hActor);
+                        console.log(`Heatmap overlay added to ${viewConfig.id}`);
+                    } catch (e) {
+                        console.error(`Failed to add heatmap overlay to ${viewConfig.id}:`, e);
+                    }
+                } else {
+                    console.log(`No heatmap data available for ${viewConfig.id}`);
                 }
 
                 // Add Crosshair Actor for this view
@@ -313,17 +351,66 @@ document.addEventListener('DOMContentLoaded', function () {
                     updateAllSlices(i, j, k);
                 });
                 interactor.onLeftButtonPress((event) => {
+                    console.log(`=== LEFT CLICK on ${viewConfig.id} ===`);
+                    console.log('Event:', event);
                     const pos = event.position;
+                    console.log('Mouse position:', pos);
+                    
                     picker.initialize();
                     picker.pick([pos.x, pos.y, 0.0], renderer);
+                    console.log('Picker actors found:', picker.getActors().length);
+                    
                     if (picker.getActors().length > 0) {
                         const pickedPoint = picker.getPickPosition();
+                        console.log('Picked point (world coords):', pickedPoint);
+                        
                         const worldToIndex = imageData.worldToIndex(pickedPoint);
-                        const i = Math.round(worldToIndex[0]);
-                        const j = Math.round(worldToIndex[1]);
-                        const k = Math.round(worldToIndex[2]);
+                        console.log('World to index result:', worldToIndex);
+                        
+                        let i = Math.round(worldToIndex[0]);
+                        let j = Math.round(worldToIndex[1]);
+                        let k = Math.round(worldToIndex[2]);
+                        
+                        // IMPORTANT: Only update the coordinates visible in this view
+                        // Keep the perpendicular axis at its current slice
+                        const currentI = sliceMappers[0].getSlice();
+                        const currentJ = sliceMappers[1].getSlice();
+                        const currentK = sliceMappers[2].getSlice();
+                        
+                        console.log(`Picked indices before correction: i=${i}, j=${j}, k=${k}`);
+                        console.log(`Current slices: i=${currentI}, j=${currentJ}, k=${currentK}`);
+                        
+                        // Based on view orientation, keep the perpendicular axis unchanged
+                        switch(viewConfig.axis) {
+                            case 0: // Sagittal view: shows Y-Z plane, keep X unchanged
+                                i = currentI;
+                                console.log('Sagittal view: keeping i (X) = ' + i);
+                                break;
+                            case 1: // Coronal view: shows X-Z plane, keep Y unchanged
+                                j = currentJ;
+                                console.log('Coronal view: keeping j (Y) = ' + j);
+                                break;
+                            case 2: // Axial view: shows X-Y plane, keep Z unchanged
+                                k = currentK;
+                                console.log('Axial view: keeping k (Z) = ' + k);
+                                break;
+                        }
+                        
+                        console.log(`Final indices: i=${i}, j=${j}, k=${k}`);
+                        console.log(`Current slices before update: i=${sliceMappers[0]?.getSlice()}, j=${sliceMappers[1]?.getSlice()}, k=${sliceMappers[2]?.getSlice()}`);
+                        
                         updateAllSlices(i, j, k);
+                        
+                        console.log(`Current slices after update: i=${sliceMappers[0]?.getSlice()}, j=${sliceMappers[1]?.getSlice()}, k=${sliceMappers[2]?.getSlice()}`);
+                        console.log(`Slider values after update: sagittal=${sagittalSlider.value}, coronal=${coronalSlider.value}, axial=${axialSlider.value}`);
+                        
+                        // Prevent default interactor behavior from interfering
+                        event.callData.handled = true;
+                        console.log('✓ Event handled');
+                    } else {
+                        console.log('✗ No actors picked');
                     }
+                    console.log('=== END CLICK ===\n');
                 });
                 renWin.getRenderWindow().render();
             });
@@ -375,16 +462,19 @@ document.addEventListener('DOMContentLoaded', function () {
 
 
             sagittalSlider.addEventListener('input', (e) => {
+                if (isUpdatingSliders) return; // Skip if programmatically updated
                 const i = parseInt(e.target.value, 10);
                 updateAllSlices(i, sliceMappers[1].getSlice(), sliceMappers[2].getSlice());
             });
 
             coronalSlider.addEventListener('input', (e) => {
+                if (isUpdatingSliders) return; // Skip if programmatically updated
                 const j = parseInt(e.target.value, 10);
                 updateAllSlices(sliceMappers[0].getSlice(), j, sliceMappers[2].getSlice());
             });
 
             axialSlider.addEventListener('input', (e) => {
+                if (isUpdatingSliders) return; // Skip if programmatically updated
                 const k = parseInt(e.target.value, 10);
                 updateAllSlices(sliceMappers[0].getSlice(), sliceMappers[1].getSlice(), k);
             });
@@ -395,11 +485,15 @@ document.addEventListener('DOMContentLoaded', function () {
             const opacitySlider = document.getElementById('opacitySlider');
 
             if (heatmapToggle && heatmapControls && opacitySlider) {
-                if (heatmapData) {
+                if (heatmapData && heatmapActors.length > 0) {
+                    console.log(`Heatmap system initialized with ${heatmapActors.length} actors`);
+                    
                     heatmapToggle.addEventListener('change', (e) => {
                         const visible = e.target.checked;
                         heatmapActors.forEach(actor => actor.setVisibility(visible));
                         heatmapControls.style.display = visible ? 'flex' : 'none';
+                        console.log(`Heatmap visibility: ${visible}`);
+                        
                         // Force re-render
                         allRenderWindows.forEach(rw => rw.getRenderWindow().render());
                     });
@@ -417,10 +511,11 @@ document.addEventListener('DOMContentLoaded', function () {
                 } else {
                     // Disable toggle if no heatmap
                     heatmapToggle.disabled = true;
-                    heatmapToggle.parentElement.title = "No heatmap available";
+                    heatmapToggle.parentElement.title = "No heatmap available for this series";
+                    console.warn("Heatmap not available or no actors created");
                 }
             } else {
-                console.warn("Heatmap controls not found in DOM. Skipping event listeners.");
+                console.warn("Heatmap control elements not found in DOM");
             }
 
             resetButton.addEventListener('click', resetViews);
@@ -435,16 +530,159 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    function setupChart() {
-        const config = JSON.parse(document.getElementById('viewer-config').textContent);
+    function setupAIProbabilityGraph() {
+        const configElement = document.getElementById('viewer-config');
+        if (!configElement) {
+            console.error('viewer-config element not found');
+            return;
+        }
+
+        let config;
+        try {
+            config = JSON.parse(configElement.textContent);
+        } catch (e) {
+            console.error('Failed to parse viewer-config:', e);
+            return;
+        }
+
         const eceProbability = config.eceProbability;
-        if (eceProbability !== null && document.getElementById('probabilityChart')) {
-            const ctx = document.getElementById('probabilityChart').getContext('2d');
-            const nonEceProbability = 1.0 - eceProbability;
-            new Chart(ctx, { type: 'bar', data: { labels: ['ECE', 'Non-ECE'], datasets: [{ data: [eceProbability, nonEceProbability], backgroundColor: ['rgba(217, 83, 79, 0.7)', 'rgba(91, 192, 222, 0.7)'], borderColor: ['rgba(217, 83, 79, 1)', 'rgba(91, 192, 222, 1)'], borderWidth: 1, barPercentage: 0.6, categoryPercentage: 0.7 }] }, options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, title: { display: true, text: 'Prediction Probability' }, datalabels: { display: true, color: 'black', font: { weight: 'bold' }, anchor: 'end', align: 'end', formatter: (value) => `${(value * 100).toFixed(1)}%` } }, scales: { x: { beginAtZero: true, max: 1.0, title: { display: true, text: 'Probability Score' } }, y: { grid: { display: false } } } } });
+        const analysisContent = document.getElementById('analysisContent');
+        const noAnalysisMessage = document.getElementById('noAnalysisMessage');
+        const probabilityChart = document.getElementById('probabilityChart');
+        const probValue = document.getElementById('probValue');
+
+        console.log('=== setupAIProbabilityGraph ===');
+        console.log('Full config:', config);
+        console.log('eceProbability value:', eceProbability);
+        console.log('eceProbability type:', typeof eceProbability);
+        console.log('analysisContent element:', analysisContent);
+        console.log('noAnalysisMessage element:', noAnalysisMessage);
+
+        // Show/hide analysis content based on data availability
+        const hasValidProbability = eceProbability !== null && 
+                                    eceProbability !== undefined && 
+                                    eceProbability !== 'null' &&
+                                    !isNaN(eceProbability) &&
+                                    eceProbability !== '';
+
+        console.log('hasValidProbability:', hasValidProbability);
+
+        if (hasValidProbability) {
+            const nonEceProbability = 1.0 - parseFloat(eceProbability);
+
+            // Show analysis content, hide no-analysis message
+            if (analysisContent) analysisContent.style.display = 'block';
+            if (noAnalysisMessage) noAnalysisMessage.style.display = 'none';
+            
+            console.log('Displaying AI analysis with ECE probability:', eceProbability);
+
+            // Update probability value
+            if (probValue) {
+                probValue.textContent = `${(parseFloat(eceProbability) * 100).toFixed(1)}`;
+            }
+
+            // Create Doughnut Chart
+            if (probabilityChart && probabilityChart.getContext) {
+                try {
+                    const ctx = probabilityChart.getContext('2d');
+                    
+                    // Destroy existing chart if it exists
+                    const existingChart = Chart.getChart(ctx);
+                    if (existingChart) {
+                        existingChart.destroy();
+                    }
+
+                    new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['ECE Risk', 'Non-ECE'],
+                            datasets: [{
+                                data: [parseFloat(eceProbability), nonEceProbability],
+                                backgroundColor: [
+                                    'rgba(220, 53, 69, 0.8)',    // Red for ECE Risk
+                                    'rgba(40, 167, 69, 0.8)'     // Green for Non-ECE
+                                ],
+                                borderColor: [
+                                    'rgba(220, 53, 69, 1)',
+                                    'rgba(40, 167, 69, 1)'
+                                ],
+                                borderWidth: 2
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: true,
+                            circumference: 360,
+                            rotation: 0,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    labels: {
+                                        color: '#f8f9fa',
+                                        font: {
+                                            size: 11,
+                                            weight: '500'
+                                        },
+                                        padding: 8,
+                                        usePointStyle: true
+                                    }
+                                },
+                                title: {
+                                    display: true,
+                                    text: 'ECE Probability',
+                                    color: '#f8f9fa',
+                                    font: {
+                                        size: 13,
+                                        weight: 'bold'
+                                    },
+                                    padding: 8
+                                },
+                                datalabels: {
+                                    color: '#f8f9fa',
+                                    font: {
+                                        weight: 'bold',
+                                        size: 11
+                                    },
+                                    formatter: (value) => `${(value * 100).toFixed(1)}%`
+                                },
+                                tooltip: {
+                                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                                    titleColor: '#f8f9fa',
+                                    bodyColor: '#f8f9fa',
+                                    borderColor: '#f8f9fa',
+                                    borderWidth: 1,
+                                    padding: 8,
+                                    titleFont: {
+                                        size: 12,
+                                        weight: 'bold'
+                                    },
+                                    bodyFont: {
+                                        size: 11
+                                    },
+                                    callbacks: {
+                                        label: function(context) {
+                                            return `${context.label}: ${(context.parsed * 100).toFixed(1)}%`;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    console.log('✓ Doughnut chart created successfully');
+                } catch (e) {
+                    console.error('✗ Failed to create AI probability chart:', e);
+                }
+            } else {
+                console.warn('probabilityChart element not found or no getContext method');
+            }
+        } else {
+            console.log('No valid AI probability data, showing default message');
+            if (analysisContent) analysisContent.style.display = 'none';
+            if (noAnalysisMessage) noAnalysisMessage.style.display = 'block';
         }
     }
 
     setupVtk();
-    setupChart();
+    setupAIProbabilityGraph();
 });

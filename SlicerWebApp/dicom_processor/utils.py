@@ -438,22 +438,19 @@ def generate_heatmap(dicom_directory):
     heatmap_final_np = sitk.GetArrayFromImage(sitk_heatmap_uint8)
     heatmap_final_np = heatmap_final_np.astype(np.uint8)
     
-    # For VTK, we need flat array.
-    # VTK ImageData with (x, y, z) dims expects data ordered such that x changes fastest.
-    # Numpy (z, y, x) flattened: z changes slowest, then y, then x.
-    # So iterating flat array: 
-    #   idx 0: (0,0,0)
-    #   idx 1: (0,0,1) -> x=1
-    #   ...
-    # This matches VTK's expectation if we SetDimensions(x, y, z).
-    
-    flat_data = heatmap_final_np.ravel()
+    # For VTK, we need to transpose (z, y, x) → (x, y, z) for proper memory ordering
+    # VTK ImageData with (x, y, z) dims expects data where x changes fastest in memory
+    heatmap_xyz = np.transpose(heatmap_final_np, (2, 1, 0))  # (z, y, x) → (x, y, z)
+    flat_data = np.ascontiguousarray(heatmap_xyz).ravel()
     
     vtk_data_array = numpy_to_vtk(num_array=flat_data, deep=True, array_type=vtk.VTK_UNSIGNED_CHAR)
     
     vtk_img = vtk.vtkImageData()
     dims = sitk_heatmap_uint8.GetSize() # (x, y, z)
-    vtk_img.SetDimensions(dims)
+    # SetDimensions takes number of points, not number of cells
+    # For an image with nx × ny × nz voxels, we have (nx+1) × (ny+1) × (nz+1) points
+    # But for images without explicit boundaries, we use (nx, ny, nz)
+    vtk_img.SetDimensions(dims[0], dims[1], dims[2])
     vtk_img.SetSpacing(sitk_heatmap_uint8.GetSpacing())
     vtk_img.SetOrigin(sitk_heatmap_uint8.GetOrigin())
     

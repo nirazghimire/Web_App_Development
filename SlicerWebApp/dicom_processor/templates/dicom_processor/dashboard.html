@@ -6,286 +6,494 @@ Dashboard - {{ series.name|default:"Viewer" }}
 {% endblock %}
 
 {% block content %}
-<div class="container-fluid d-flex flex-column p-2" style="height: 92vh;">
-
-    <div class="row g-2 mb-2">
-        <div class="col">
-            <div class="d-flex justify-content-between px-3 py-2 bg-light border rounded align-items-center">
-                <div>
-                    <strong>Patient:</strong> {{ series.patient_id|default:"N/A" }} |
-                    <strong>Age:</strong> {{ series.patient_age|default:"N/A" }} |
-                    <strong>Gender:</strong> {{ series.patient_gender|default:"N/A" }}
-                </div>
-                <div>
-                    <strong class="text-primary me-3">Series:</strong> {{ series.name|default:"No Series Selected" }}
-                    <button id="resetViewsButton" class="btn btn-sm btn-outline-secondary">Reset Views</button>
-                </div>
-            </div>
+<!-- Full-screen dashboard layout -->
+<div class="dashboard-wrapper">
+    <!-- Info Bar -->
+    <div class="info-bar">
+        <div>
+            <strong>Patient:</strong> {{ series.patient_id|default:"N/A" }} |
+            <strong>Age:</strong> {{ series.patient_age|default:"N/A" }} |
+            <strong>Gender:</strong> {{ series.patient_gender|default:"N/A" }}
+        </div>
+        <div>
+            <strong class="text-primary me-3">Series:</strong> {{ series.name|default:"No Series Selected" }}
+            <button id="resetViewsButton" class="btn btn-sm btn-outline-secondary">Reset Views</button>
         </div>
     </div>
-    <div class="row g-2 flex-grow-1" style="position: relative;">
-        <div class="col-lg-12 d-flex flex-column">
-            <div class="row g-2 h-50 pb-1">
-                <div class="col-6 d-flex flex-column">
-                    <div class="viewer-container">
-                        <div class="viewer-header d-flex justify-content-between align-items-center">
-                            <span>3D View</span>
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" id="heatmapToggle">
-                                <label class="form-check-label text-light small" for="heatmapToggle">Heatmap</label>
-                            </div>
-                        </div>
-                        <div class="viewer-box" id="view3D"></div>
+
+    <!-- Viewer Grid + AI Sidebar Wrapper -->
+    <div class="viewer-main-wrapper">
+        <!-- Viewer Grid -->
+        <div class="viewer-grid">
+            <!-- 3D View -->
+            <div class="viewer-container">
+                <div class="viewer-header d-flex justify-content-between align-items-center">
+                    <span>3D View</span>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="heatmapToggle">
+                        <label class="form-check-label text-light small" for="heatmapToggle">Heatmap</label>
                     </div>
                 </div>
-                <div class="col-6 d-flex flex-column">
-                    <div class="viewer-container">
-                        <div class="viewer-header">Axial</div>
-                        <div class="viewer-box" id="viewAxial">
-                            <span class="orientation-marker top">A</span>
-                            <span class="orientation-marker bottom">P</span>
-                            <span class="orientation-marker left">R</span>
-                            <span class="orientation-marker right">L</span>
-                        </div>
-                        <div class="viewer-footer">
-                            <input type="range" class="form-range" id="axialSlider" min="0" value="0">
-                            <span id="axialSliceLabel" class="small">0</span>
-                        </div>
-                    </div>
+                <div class="viewer-box" id="view3D"></div>
+            </div>
+
+            <!-- Axial View -->
+            <div class="viewer-container">
+                <div class="viewer-header">Axial</div>
+                <div class="viewer-box" id="viewAxial">
+                    <span class="orientation-marker top">A</span>
+                    <span class="orientation-marker bottom">P</span>
+                    <span class="orientation-marker left">R</span>
+                    <span class="orientation-marker right">L</span>
+                </div>
+                <div class="viewer-footer">
+                    <input type="range" class="form-range" id="axialSlider" min="0" value="0">
+                    <span id="axialSliceLabel" class="small">0</span>
                 </div>
             </div>
-            <div class="row g-2 h-50 pt-1">
-                <div class="col-6 d-flex flex-column">
-                    <div class="viewer-container">
-                        <div class="viewer-header">Sagittal</div>
-                        <div class="viewer-box" id="viewSagittal">
-                            <span class="orientation-marker top">S</span>
-                            <span class="orientation-marker bottom">I</span>
-                            <span class="orientation-marker left">A</span>
-                            <span class="orientation-marker right">P</span>
-                        </div>
-                        <div class="viewer-footer">
-                            <input type="range" class="form-range" id="sagittalSlider" min="0" value="0">
-                            <span id="sagittalSliceLabel" class="small">0</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-6 d-flex flex-column">
-                    <div class="viewer-container">
-                        <div class="viewer-header d-flex justify-content-between align-items-center">
-                            <span>Coronal</span>
-                            <div class="d-flex align-items-center gap-2" id="heatmapControls"
-                                style="display: none !important;">
-                                <label for="opacitySlider" class="small text-light mb-0">Opacity</label>
-                                <input type="range" class="form-range" id="opacitySlider" min="0" max="1" step="0.05"
-                                    value="0.5" style="width: 60px;">
 
-                                <!-- Heatmap Legend -->
-                                <div class="ms-2 border-start ps-2 d-flex align-items-center gap-2">
-                                    <span class="small text-light" style="font-size: 0.75rem;">Attention:</span>
-                                    <div class="d-flex flex-column">
-                                        <!-- Gradient matches Jet colormap: Transparent/Black -> Blue -> Cyan -> Green -> Yellow -> Red -->
-                                        <div
-                                            style="width: 80px; height: 8px; background: linear-gradient(to right, black, blue, cyan, green, yellow, red); border: 1px solid #6c757d; border-radius: 2px;">
-                                        </div>
-                                        <div class="d-flex justify-content-between w-100"
-                                            style="font-size: 0.6rem; color: #adb5bd; line-height: 1; margin-top: 1px;">
-                                            <span>Low</span>
-                                            <span>High</span>
-                                        </div>
-                                    </div>
+            <!-- Sagittal View -->
+            <div class="viewer-container">
+                <div class="viewer-header">Sagittal</div>
+                <div class="viewer-box" id="viewSagittal">
+                    <span class="orientation-marker top">S</span>
+                    <span class="orientation-marker bottom">I</span>
+                    <span class="orientation-marker left">A</span>
+                    <span class="orientation-marker right">P</span>
+                </div>
+                <div class="viewer-footer">
+                    <input type="range" class="form-range" id="sagittalSlider" min="0" value="0">
+                    <span id="sagittalSliceLabel" class="small">0</span>
+                </div>
+            </div>
+
+            <!-- Coronal View -->
+            <div class="viewer-container">
+                <div class="viewer-header d-flex justify-content-between align-items-center">
+                    <span>Coronal</span>
+                    <div class="d-flex align-items-center gap-2" id="heatmapControls"
+                        style="display: none !important; font-size: 0.75em;">
+                        <label for="opacitySlider" class="small text-light mb-0">Opacity</label>
+                        <input type="range" class="form-range" id="opacitySlider" min="0" max="1" step="0.05"
+                            value="0.5" style="width: 50px;">
+                        <!-- Heatmap Legend -->
+                        <div class="ms-2 border-start ps-2 d-flex align-items-center gap-2">
+                            <span class="small text-light"
+                                style="font-size: 0.7rem; white-space: nowrap;">Legend:</span>
+                            <div class="d-flex flex-column">
+                                <div
+                                    style="width: 60px; height: 6px; background: linear-gradient(to right, black, blue, cyan, green, yellow, red); border: 1px solid #6c757d; border-radius: 1px;">
+                                </div>
+                                <div class="d-flex justify-content-between w-100"
+                                    style="font-size: 0.55rem; color: #adb5bd; line-height: 1; margin-top: 0;">
+                                    <span>Low</span>
+                                    <span>High</span>
                                 </div>
                             </div>
                         </div>
-                        <div class="viewer-box" id="viewCoronal">
-                            <span class="orientation-marker top">S</span>
-                            <span class="orientation-marker bottom">I</span>
-                            <span class="orientation-marker left">R</span>
-                            <span class="orientation-marker right">L</span>
-                        </div>
-                        <div class="viewer-footer">
-                            <input type="range" class="form-range" id="coronalSlider" min="0" value="0">
-                            <span id="coronalSliceLabel" class="small">0</span>
-                        </div>
                     </div>
+                </div>
+                <div class="viewer-box" id="viewCoronal">
+                    <span class="orientation-marker top">S</span>
+                    <span class="orientation-marker bottom">I</span>
+                    <span class="orientation-marker left">R</span>
+                    <span class="orientation-marker right">L</span>
+                </div>
+                <div class="viewer-footer">
+                    <input type="range" class="form-range" id="coronalSlider" min="0" value="0">
+                    <span id="coronalSliceLabel" class="small">0</span>
+                </div>
+            </div>
+
+            <!-- Loading Overlay -->
+            <div id="loadingOverlay" style="display: flex;">
+                <div id="loadingMessage" class="text-light">
+                    <div class="spinner-border me-3" role="status"></div>
+                    <span>Initializing 3D Viewer...</span>
                 </div>
             </div>
         </div>
 
-        <div id="loadingOverlay" style="display: flex;">
-            <div id="loadingMessage" class="text-light">
-                <div class="spinner-border me-3" role="status"></div>
-                <span>Initializing 3D Viewer...</span>
+        <!-- AI Probability Sidebar (Context-Aware) -->
+        <!-- AI Probability Sidebar (Context-Aware) - ALWAYS VISIBLE -->
+        <div id="aiSidebar" class="ai-sidebar">
+            <div class="ai-sidebar-header">
+                <h6 class="mb-0">AI Analysis</h6>
+                <!-- Close button removed since it's permanent now, 
+                     or we can keep it if user wants to toggle, but for now enforcing permanent structure -->
+            </div>
+            <div class="ai-sidebar-content">
+
+                <!-- Content when Data Exists -->
+                <div id="analysisContent" style="display: none;">
+                    <div class="canvas-container">
+                        <canvas id="probabilityChart"></canvas>
+                    </div>
+                    <div class="ai-stats mt-3">
+                        <div class="text-center text-light">
+                            Risk Probability: <span class="text-danger fw-bold fs-4"><span
+                                    id="probValue">--</span>%</span>
+                            <div class="small text-muted mt-1">(ECE Risk)</div>
+                        </div>
+                    </div>
+                    <div class="alert alert-secondary mt-3 small p-2">
+                        <i class="bi bi-info-circle"></i> Result indicated by AI model. Please verify clinically.
+                    </div>
+                </div>
+
+                <!-- Content when No Data -->
+                <div id="noAnalysisMessage" class="p-3 text-center text-muted mt-5">
+                    <i class="bi bi-robot fs-1 mb-3 d-block"></i>
+                    <h6>No Analysis Available</h6>
+                    <p class="small">AI processing has not been performed on this series.</p>
+                </div>
+
             </div>
         </div>
-    </div>
-</div>
-{% endblock %}
+        {% endblock %}
 
-{% block styles %}
-{{ block.super }}
-<style>
-    .vh-100 {
-        height: 90vh;
-    }
+        {% block styles %}
+        {{ block.super }}
+        <style>
+            /* ============================================
+       FULL-SCREEN DASHBOARD LAYOUT
+       Professional CSS Grid - No Scrolling
+       ============================================ */
 
-    .viewer-container {
-        width: 100%;
-        height: 100%;
-        display: flex;
-        flex-direction: column;
-        background-color: #000;
-        border: 1px solid #495057;
-        border-radius: 0.25rem;
-        position: relative;
-    }
+            /* Override base template container */
+            body>.container.mt-4 {
+                max-width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
+            }
 
-    .viewer-header {
-        text-align: center;
-        color: #f8f9fa;
-        padding: 4px;
-        background-color: #343a40;
-        font-size: 0.9em;
-        font-weight: bold;
-    }
+            .dashboard-wrapper {
+                display: flex;
+                flex-direction: column;
+                height: calc(100vh - 56px);
+                /* Viewport minus navbar */
+                overflow: hidden;
+                padding: 6px;
+                box-sizing: border-box;
+            }
 
-    .viewer-box {
-        flex-grow: 1;
-        position: relative;
-        overflow: hidden;
-        min-height: 200px;
-    }
+            .viewer-main-wrapper {
+                display: flex;
+                flex: 1;
+                gap: 6px;
+                min-height: 0;
+                position: relative;
+            }
 
-    #loadingOverlay {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.85);
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        z-index: 1000;
-        color: white;
-        font-size: 1.2rem;
-        border-radius: 0.25rem;
-    }
+            .info-bar {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 5px 10px;
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 4px;
+                margin-bottom: 5px;
+                flex-shrink: 0;
+                font-size: 0.85em;
+                min-height: 36px;
+                line-height: 1.2;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
 
-    .form-range {
-        padding: 0;
-        -webkit-appearance: none;
-        appearance: none;
-        width: 100%;
-        height: 6px;
-        background: #dee2e6;
-        border-radius: 3px;
-        outline: none;
-    }
+            .viewer-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                grid-template-rows: 1fr 1fr;
+                gap: 6px;
+                flex: 1;
+                /* Take remaining space */
+                min-height: 0;
+                /* Allow shrinking */
+                position: relative;
+            }
 
-    .form-range::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 16px;
-        height: 16px;
-        background: #0d6efd;
-        border-radius: 50%;
-        cursor: pointer;
-        margin-top: -5px;
-    }
+            /* ============================================
+       AI PROBABILITY SIDEBAR STYLES
+       ============================================ */
 
-    .form-range::-moz-range-thumb {
-        width: 16px;
-        height: 16px;
-        background: #0d6efd;
-        border-radius: 50%;
-        cursor: pointer;
-        border: none;
-    }
+            .ai-sidebar {
+                display: flex;
+                flex-direction: column;
+                width: 280px;
+                background-color: #343a40;
+                border: 1px solid #495057;
+                border-radius: 4px;
+                overflow: hidden;
+                animation: slideIn 0.3s ease-out;
+            }
 
-    .form-range::-moz-range-track {
-        width: 100%;
-        height: 6px;
-        background: #dee2e6;
-        border-radius: 3px;
-        border: none;
-    }
+            @keyframes slideIn {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
 
-    .heatmap-flex-card {
-        flex: 1 1 auto;
-        display: flex;
-        flex-direction: column;
-    }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
 
-    .probability-flex-card {
-        flex: 0 0 250px;
-    }
+            .ai-sidebar-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 10px 12px;
+                background-color: #495057;
+                color: #f8f9fa;
+                font-weight: bold;
+                font-size: 0.95em;
+                flex-shrink: 0;
+                border-bottom: 1px solid #6c757d;
+            }
 
-    .viewer-footer {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 4px 8px;
-        background-color: #343a40;
-    }
+            .ai-sidebar-content {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                padding: 12px;
+                overflow-y: auto;
+                gap: 12px;
+            }
 
-    .viewer-footer .form-range {
-        flex-grow: 1;
-    }
+            .canvas-container {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                min-height: 220px;
+                background: rgba(0, 0, 0, 0.2);
+                border-radius: 4px;
+                padding: 8px;
+            }
 
-    .viewer-footer .small {
-        color: #f8f9fa !important;
-        min-width: 25px;
-        text-align: right;
-    }
+            .canvas-container canvas {
+                max-width: 100%;
+                max-height: 200px;
+            }
 
-    /* Orientation Markers */
-    .orientation-marker {
-        position: absolute;
-        color: lime;
-        /* Professional medical green */
-        font-weight: bold;
-        font-size: 1.2em;
-        z-index: 10;
-        pointer-events: none;
-        /* Let clicks pass through */
-        text-shadow: 1px 1px 0 #000;
-    }
+            .ai-stats {
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
 
-    .orientation-marker.top {
-        top: 5px;
-        left: 50%;
-        transform: translateX(-50%);
-    }
+            .stat-item {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                padding: 8px;
+                background-color: rgba(0, 0, 0, 0.2);
+                border-radius: 4px;
+                font-size: 0.85em;
+            }
 
-    .orientation-marker.bottom {
-        bottom: 5px;
-        left: 50%;
-        transform: translateX(-50%);
-    }
+            .stat-label {
+                color: #adb5bd;
+                font-weight: 500;
+            }
 
-    .orientation-marker.left {
-        left: 5px;
-        top: 50%;
-        transform: translateY(-50%);
-    }
+            .stat-value {
+                color: #0d6efd;
+                font-weight: bold;
+                font-size: 1.1em;
+            }
 
-    .orientation-marker.right {
-        right: 5px;
-        top: 50%;
-        transform: translateY(-50%);
-    }
-</style>
-{% endblock %}
+            .btn-close {
+                opacity: 0.7;
+                transition: opacity 0.2s;
+            }
 
-{% block scripts %}
-{{ block.super }}
+            .btn-close:hover {
+                opacity: 1;
+            }
 
-<script>
-    // Helper to inject markers (Optional, but cleaner in HTML directly for now)
-</script>
+            /* Responsive: Hide sidebar on very small screens */
+            @media (max-width: 1200px) {
+                .viewer-main-wrapper {
+                    flex-wrap: wrap;
+                }
 
-<script id="viewer-config" type="application/json">
+                .ai-sidebar {
+                    width: 240px;
+                }
+            }
+
+            .viewer-container {
+                display: flex;
+                flex-direction: column;
+                background-color: #000;
+                border: 1px solid #495057;
+                border-radius: 4px;
+                overflow: hidden;
+                min-height: 0;
+                /* Critical: allows flex children to shrink */
+            }
+
+            .viewer-header {
+                text-align: center;
+                color: #f8f9fa;
+                padding: 3px 6px;
+                background-color: #343a40;
+                font-size: 0.8em;
+                font-weight: bold;
+                flex-shrink: 0;
+                min-height: 22px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 6px;
+                flex-wrap: wrap;
+            }
+
+            .viewer-box {
+                flex: 1;
+                position: relative;
+                overflow: hidden;
+                min-height: 0;
+                /* Critical: allows flex to shrink properly */
+            }
+
+            #loadingOverlay {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background-color: rgba(0, 0, 0, 0.85);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                z-index: 1000;
+                color: white;
+                font-size: 1.2rem;
+                border-radius: 0.25rem;
+            }
+
+            .form-range {
+                padding: 0;
+                -webkit-appearance: none;
+                appearance: none;
+                width: 100%;
+                height: 4px;
+                background: #dee2e6;
+                border-radius: 2px;
+                outline: none;
+                margin: 0;
+            }
+
+            .form-range::-webkit-slider-thumb {
+                -webkit-appearance: none;
+                appearance: none;
+                width: 12px;
+                height: 12px;
+                background: #0d6efd;
+                border-radius: 50%;
+                cursor: pointer;
+                margin-top: -4px;
+            }
+
+            .form-range::-moz-range-thumb {
+                width: 12px;
+                height: 12px;
+                background: #0d6efd;
+                border-radius: 50%;
+                cursor: pointer;
+                border: none;
+            }
+
+            .form-range::-moz-range-track {
+                width: 100%;
+                height: 4px;
+                background: #dee2e6;
+                border-radius: 2px;
+                border: none;
+            }
+
+            .heatmap-flex-card {
+                flex: 1 1 auto;
+                display: flex;
+                flex-direction: column;
+            }
+
+            .probability-flex-card {
+                flex: 0 0 250px;
+            }
+
+            .viewer-footer {
+                display: flex;
+                align-items: center;
+                gap: 4px;
+                padding: 3px 6px;
+                background-color: #343a40;
+                min-height: 24px;
+            }
+
+            .viewer-footer .form-range {
+                flex-grow: 1;
+                min-width: 60px;
+            }
+
+            .viewer-footer .small {
+                color: #f8f9fa !important;
+                min-width: 20px;
+                text-align: right;
+                font-size: 0.75em;
+            }
+
+            /* Orientation Markers */
+            .orientation-marker {
+                position: absolute;
+                color: lime;
+                /* Professional medical green */
+                font-weight: bold;
+                font-size: 0.9em;
+                z-index: 10;
+                pointer-events: none;
+                /* Let clicks pass through */
+                text-shadow: 1px 1px 0 #000;
+            }
+
+            .orientation-marker.top {
+                top: 3px;
+                left: 50%;
+                transform: translateX(-50%);
+            }
+
+            .orientation-marker.bottom {
+                bottom: 3px;
+                left: 50%;
+                transform: translateX(-50%);
+            }
+
+            .orientation-marker.left {
+                left: 3px;
+                top: 50%;
+                transform: translateY(-50%);
+            }
+
+            .orientation-marker.right {
+                right: 3px;
+                top: 50%;
+                transform: translateY(-50%);
+            }
+        </style>
+        {% endblock %}
+
+        {% block scripts %}
+        {{ block.super }}
+
+        <script>
+            // Helper to inject markers (Optional, but cleaner in HTML directly for now)
+        </script>
+
+        <script id="viewer-config" type="application/json">
 {
     "seriesId": {{ series.id|default:'null' }},
     "volumeUrl": "{% if series %}{% url 'dicom_processor:get_volume_url' series.id %}{% endif %}",
@@ -294,7 +502,7 @@ Dashboard - {{ series.name|default:"Viewer" }}
 }
 </script>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script type="text/javascript" src="{% static 'js/dist/vtk.bundle.js' %}"></script>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <script type="text/javascript" src="{% static 'js/dist/vtk.bundle.js' %}"></script>
 
-{% endblock %}
+        {% endblock %}
