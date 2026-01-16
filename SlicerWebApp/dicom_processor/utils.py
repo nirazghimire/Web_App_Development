@@ -244,45 +244,23 @@ def generate_all_directional_slices(dicom_folder, output_folder, user_id, series
 
 def get_model(input_shape=(90, 90, 25, 1), num_classes=2):
     """
-    Defines the 3D CNN model architecture, loads weights from a checkpoint, 
-    and returns the compiled model.
+    Loads the pre-trained 3D CNN model for heatmap generation.
+    The model was saved in Keras 3 format (.keras file).
     """
     
-    # --- Define Model Architecture ---
-    i = Input(shape=input_shape)
-    
-    # Block 1
-    x = Conv3D(32, (3, 3, 3), activation='relu', padding='same', name='conv3d_1')(i)
-    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_1')(x)
-    
-    # Block 2
-    x = Conv3D(64, (3, 3, 3), activation='relu', padding='same', name='conv3d_2')(x)
-    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_2')(x)
-    
-    # Block 3
-    x = Conv3D(128, (3, 3, 3), activation='relu', padding='same', name='conv3d_3')(x)
-    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_3')(x)
-
-    # Global Average Pooling and Dense Layers
-    x = GlobalAveragePooling3D(name='global_avg_pool')(x)
-    x = Dense(256, activation='relu', name='dense_1')(x)
-    x = Dropout(0.3, name='dropout_1')(x)
-    x = Dense(num_classes, name='dense_output')(x)
-    x = Activation('softmax', name='activation_softmax')(x)
-    
-    model = Model(inputs=i, outputs=x)
-    
-    # --- Load Weights from Checkpoint ---
     checkpoint_dir = os.path.join(settings.BASE_DIR, 'dicom_processor', 'checkpoint_v2_1')
-    latest_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
+    keras_path = os.path.join(checkpoint_dir, 'weights-improvement_v2_1.keras')
     
-    if latest_checkpoint:
-        print(f"--- Loading weights from checkpoint: {latest_checkpoint} ---")
-        model.load_weights(latest_checkpoint)
-    else:
-        raise FileNotFoundError("No model checkpoint found. Aborting heatmap generation.")
-
-    return model
+    # Load the full Keras model (architecture + weights)
+    if os.path.exists(keras_path):
+        print(f"--- Loading model from Keras file: {keras_path} ---")
+        # Use keras.saving.load_model for Keras 3 format
+        import keras
+        model = keras.saving.load_model(keras_path, compile=False)
+        print(f"--- Model loaded successfully. Layers: {len(model.layers)} ---")
+        return model
+    
+    raise FileNotFoundError(f"No model found at {keras_path}.")
 
 def generate_heatmap(dicom_directory):
     """
@@ -336,23 +314,32 @@ def generate_heatmap(dicom_directory):
     if model is None:
         return None, None
 
+    # Find last Conv3D layer - use string check for Keras 3 compatibility
     last_conv_layer_name = None
     for layer in reversed(model.layers):
-        if isinstance(layer, Conv3D):
+        if 'Conv3D' in layer.__class__.__name__ or 'conv3d' in layer.name.lower():
             last_conv_layer_name = layer.name
+            print(f"Found Conv3D layer: {last_conv_layer_name}")
             break
             
     if last_conv_layer_name is None:
-        print("Error: No Conv3D layer found.")
+        print("Error: No Conv3D layer found in model.")
         return None, None
 
+    # Get model output - handle both single tensor and list outputs
+    model_output = model.output
+    if isinstance(model_output, list):
+        model_output = model_output[0]
+    
     grad_model = tf.keras.models.Model(
-        [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
+        inputs=model.inputs, 
+        outputs=[model.get_layer(last_conv_layer_name).output, model_output]
     )
 
     with tf.GradientTape() as tape:
         conv_output, preds = grad_model(input_vol_for_model)
-        pred_index = tf.argmax(preds[0])
+        # preds shape is (1, 2) for 2-class classification
+        pred_index = int(tf.argmax(preds[0]).numpy())  # Convert to Python int
         prediction_score_value = float(preds[0][pred_index].numpy())
         class_channel = preds[:, pred_index]
 
@@ -707,19 +694,13 @@ def convert_nrrd_to_vti(nrrd_file_path, output_filename_base="heatmap_volume"):
 
         # Prepare output directory for the VTI file
         output_directory = os.path.join(settings.MEDIA_ROOT, 'heatmaps_vti')
-        os.makedirs(output_directory, exist_ok=True)
         
         output_filename = f"{output_filename_base}.vti"
         output_path = os.path.join(output_directory, output_filename)
-
-        # Write to .vti file using vtkXMLImageDataWriter
-        writer = vtk.vtkXMLImageDataWriter()
-        writer.SetFileName(output_path)
-        writer.SetInputData(image_data)
-        writer.Write()
-
-        print(f"[SUCCESS] Converted NRRD to VTI file: '{output_path}'")
-        return output_path
+        
+        # Create full output path including subdirectories
+        output_file_dir = os.path.dirname(output_path)
+        os.makedirs(output_file_dir, exist_ok=True)
 
     except Exception as e:
         print(f"[EXCEPTION] Error during NRRD to VTI conversion: {str(e)}")

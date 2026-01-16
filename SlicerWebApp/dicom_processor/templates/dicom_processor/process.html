@@ -3,6 +3,20 @@
 {% block title %}Process {{ series.name }}{% endblock %}
 
 {% block content %}
+<div id="processingOverlay" class="processing-overlay" style="display: none;">
+    <div class="processing-content">
+        <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        <h5 class="text-primary mb-2">Processing DICOM Series...</h5>
+        <p id="processingStatus" class="text-muted mb-3">Loading AI model...</p>
+        <div class="progress" style="width: 300px; height: 8px;">
+            <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;"></div>
+        </div>
+        <p class="text-muted small mt-3">This may take 2-5 minutes for large scans.</p>
+    </div>
+</div>
+
 <div class="container mt-4">
     <div class="row justify-content-center">
         <div class="col-md-10">
@@ -10,39 +24,29 @@
             <p class="text-muted">Upload Date: {{ series.uploaded_date }}</p>
 
             <div class="row">
-                <!-- Processing Options Card -->
                 <div class="col-md-6 mb-3">
                     <div class="card h-100">
                         <div class="card-header">Processing Options</div>
                         <div class="card-body">
-                            <form method="post">
+                            <form method="post" id="processForm">
                                 {% csrf_token %}
-                                
                                 <div class="d-flex justify-content-between align-items-center mb-3">
                                     <div class="form-check">
                                         <input class="form-check-input" type="checkbox" id="generateHeatmap" checked disabled>
-                                        <label class="form-check-label" for="generateHeatmap">
-                                            Generate Heatmap & Prediction
-                                        </label>
+                                        <label class="form-check-label" for="generateHeatmap">Generate Heatmap &amp; Prediction</label>
                                     </div>
                                     {% if latest_result and latest_result.ece_probability is not None %}
-                                        {# === FIX IS HERE: Text changed and 'small' class removed to make it bigger === #}
-                                        <span class="badge bg-success p-2">
-                                            Predicted Score: {{ latest_result.ece_probability|floatformat:2 }}
-                                        </span>
+                                    <span class="badge bg-success p-2">Predicted Score: {{ latest_result.ece_probability|floatformat:2 }}</span>
                                     {% endif %}
                                 </div>
-                                
-                                <button type="submit" class="btn btn-primary">
-                                    {% if latest_result %}Re-Process{% else %}Process{% endif %}
+                                <button type="submit" class="btn btn-primary" id="processBtn">
+                                    <span id="btnText">{% if latest_result %}Re-Process{% else %}Process{% endif %}</span>
+                                    <span id="btnSpinner" class="spinner-border spinner-border-sm ms-2" style="display: none;" role="status"></span>
                                 </button>
-                                
                             </form>
                         </div>
                     </div>
                 </div>
-
-                <!-- Series Information Card -->
                 <div class="col-md-6 mb-3">
                     <div class="card h-100">
                         <div class="card-header">Series Information</div>
@@ -51,7 +55,7 @@
                             <p><strong>Directory:</strong><br><small class="text-muted">{{ series.file_path }}</small></p>
                             <p><strong>Owner:</strong> {{ series.user.username }}</p>
                             <hr>
-                            <p class="text-muted small">Click "{% if latest_result %}Re-Process{% else %}Process{% endif %}" to run the analysis model. This may take several minutes depending on the size of the scan.</p>
+                            <p class="text-muted small">Click the button to run the analysis model. This may take several minutes.</p>
                         </div>
                     </div>
                 </div>
@@ -59,4 +63,35 @@
         </div>
     </div>
 </div>
+
+<style>
+.processing-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.8); display: flex; justify-content: center; align-items: center; z-index: 9999; }
+.processing-content { background: white; padding: 40px 50px; border-radius: 12px; text-align: center; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3); max-width: 400px; }
+.progress { background-color: #e9ecef; border-radius: 4px; margin: 0 auto; }
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    var form = document.getElementById('processForm');
+    var overlay = document.getElementById('processingOverlay');
+    var statusText = document.getElementById('processingStatus');
+    var progressBar = document.getElementById('progressBar');
+    var btnSpinner = document.getElementById('btnSpinner');
+    var processBtn = document.getElementById('processBtn');
+    var messages = ['Loading AI model...', 'Reading DICOM files...', 'Running AI inference...', 'Generating heatmap...', 'Saving results...'];
+    var idx = 0;
+    form.addEventListener('submit', function() {
+        overlay.style.display = 'flex';
+        btnSpinner.style.display = 'inline-block';
+        processBtn.disabled = true;
+        setInterval(function() {
+            if (idx < messages.length) {
+                statusText.textContent = messages[idx];
+                progressBar.style.width = ((idx + 1) * 20) + '%';
+                idx++;
+            }
+        }, 10000);
+    });
+});
+</script>
 {% endblock %}

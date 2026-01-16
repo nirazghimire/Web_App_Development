@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+*.pot
+*.pyc
+
+# Static files collected
+staticfiles/
+
+# Media files (uploaded content)
+media/
+
+# Node modules
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Coverage
+htmlcov/
+.coverage
+.coverage.*
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Debug markdown files
+*.md
+!README.md
+
+# Continue extension
+.continue/
+
+# Backup files
+*.bak
+backup.json
+
+# Test scripts
+create_test_user.py
+
+# Model checkpoints (large files)
+*.keras
+*.h5
+*.ckpt*
+checkpoint_v2_1/saved_model/
+checkpoint_v2_1/*.pickle
