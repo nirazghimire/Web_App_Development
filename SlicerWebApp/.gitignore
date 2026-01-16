@@ -41,6 +41,8 @@ node_modules/
 
 # Build artifacts
 dist/
+!dicom_processor/static/dicom_processor/js/dist/
+!dicom_processor/static/dicom_processor/js/dist/vtk.bundle.js
 build/
 *.egg-info/
 

@@ -154,12 +154,28 @@ document.addEventListener('DOMContentLoaded', function () {
 
         let currentColormap = 'viridis'; // Track current colormap
 
+        // Helper function to update loading message
+        function updateLoading(message, step = null, total = null) {
+            const msgEl = loadingMessage.querySelector('span');
+            if (msgEl) {
+                if (step && total) {
+                    msgEl.textContent = `${message} (${step}/${total})`;
+                } else {
+                    msgEl.textContent = message;
+                }
+            }
+        }
+
         try {
-            loadingMessage.querySelector('span').textContent = 'Requesting data...';
+            updateLoading('Requesting volume data...', 1, 5);
             const response = await fetch(config.volumeUrl);
             const data = await response.json();
             if (!data.success) throw new Error(data.error);
+
+            updateLoading('Downloading 3D volume...', 2, 5);
             const fileContents = await HttpDataAccessHelper.fetchBinary(data.volume_url);
+
+            updateLoading('Parsing volume data...', 3, 5);
             const reader = vtkXMLImageDataReader.newInstance();
             reader.parseAsArrayBuffer(fileContents);
 
@@ -170,6 +186,7 @@ document.addEventListener('DOMContentLoaded', function () {
             console.log('Heatmap loading: config.heatmapUrl =', config.heatmapUrl);
             if (config.heatmapUrl) {
                 try {
+                    updateLoading('Loading AI heatmap overlay...', 4, 5);
                     console.log('🔄 Fetching heatmap from URL:', config.heatmapUrl);
                     const hResponse = await fetch(config.heatmapUrl);
                     const hData = await hResponse.json();
@@ -180,17 +197,17 @@ document.addEventListener('DOMContentLoaded', function () {
                         const hReader = vtkXMLImageDataReader.newInstance();
                         hReader.parseAsArrayBuffer(hFileContents);
                         heatmapData = hReader.getOutputData(0);
-                        
+
                         // Validate heatmap dimensions match original volume
                         if (heatmapData) {
                             const heatmapDims = heatmapData.getDimensions();
                             const volumeDims = imageData.getDimensions();
                             console.log('✅ Heatmap loaded successfully. Dimensions:', heatmapDims);
                             console.log('   Volume dimensions:', volumeDims);
-                            
+
                             // Check for dimension mismatch
-                            if (heatmapDims[0] !== volumeDims[0] || 
-                                heatmapDims[1] !== volumeDims[1] || 
+                            if (heatmapDims[0] !== volumeDims[0] ||
+                                heatmapDims[1] !== volumeDims[1] ||
                                 heatmapDims[2] !== volumeDims[2]) {
                                 console.warn('⚠️  Heatmap dimensions do not match volume dimensions. This may cause alignment issues.');
                             }
@@ -205,6 +222,8 @@ document.addEventListener('DOMContentLoaded', function () {
             } else {
                 console.log('ℹ️  No heatmapUrl in config - heatmap disabled for this series');
             }
+
+            updateLoading('Setting up 3D visualization...', 5, 5);
 
             const bounds = imageData.getBounds(); // [xmin, xmax, ymin, ymax, zmin, zmax]
             const center = imageData.getCenter();
@@ -444,33 +463,33 @@ document.addEventListener('DOMContentLoaded', function () {
                     console.log('Event:', event);
                     const pos = event.position;
                     console.log('Mouse position:', pos);
-                    
+
                     picker.initialize();
                     picker.pick([pos.x, pos.y, 0.0], renderer);
                     console.log('Picker actors found:', picker.getActors().length);
-                    
+
                     if (picker.getActors().length > 0) {
                         const pickedPoint = picker.getPickPosition();
                         console.log('Picked point (world coords):', pickedPoint);
-                        
+
                         const worldToIndex = imageData.worldToIndex(pickedPoint);
                         console.log('World to index result:', worldToIndex);
-                        
+
                         let i = Math.round(worldToIndex[0]);
                         let j = Math.round(worldToIndex[1]);
                         let k = Math.round(worldToIndex[2]);
-                        
+
                         // IMPORTANT: Only update the coordinates visible in this view
                         // Keep the perpendicular axis at its current slice
                         const currentI = sliceMappers[0].getSlice();
                         const currentJ = sliceMappers[1].getSlice();
                         const currentK = sliceMappers[2].getSlice();
-                        
+
                         console.log(`Picked indices before correction: i=${i}, j=${j}, k=${k}`);
                         console.log(`Current slices: i=${currentI}, j=${currentJ}, k=${currentK}`);
-                        
+
                         // Based on view orientation, keep the perpendicular axis unchanged
-                        switch(viewConfig.axis) {
+                        switch (viewConfig.axis) {
                             case 0: // Sagittal view: shows Y-Z plane, keep X unchanged
                                 i = currentI;
                                 console.log('Sagittal view: keeping i (X) = ' + i);
@@ -484,15 +503,15 @@ document.addEventListener('DOMContentLoaded', function () {
                                 console.log('Axial view: keeping k (Z) = ' + k);
                                 break;
                         }
-                        
+
                         console.log(`Final indices: i=${i}, j=${j}, k=${k}`);
                         console.log(`Current slices before update: i=${sliceMappers[0]?.getSlice()}, j=${sliceMappers[1]?.getSlice()}, k=${sliceMappers[2]?.getSlice()}`);
-                        
+
                         updateAllSlices(i, j, k);
-                        
+
                         console.log(`Current slices after update: i=${sliceMappers[0]?.getSlice()}, j=${sliceMappers[1]?.getSlice()}, k=${sliceMappers[2]?.getSlice()}`);
                         console.log(`Slider values after update: sagittal=${sagittalSlider.value}, coronal=${coronalSlider.value}, axial=${axialSlider.value}`);
-                        
+
                         // Prevent default interactor behavior from interfering
                         event.callData.handled = true;
                         console.log('✓ Event handled');
@@ -575,7 +594,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const colormapSelect = document.getElementById('colormapSelect');
             const heatmapValueReadout = document.getElementById('heatmapValueReadout');
             const colormapGradient = document.getElementById('colormapGradient');
-            
+
             // Debug: Log heatmap setup status
             console.log('=== HEATMAP SETUP DEBUG ===');
             console.log('heatmapToggle element:', heatmapToggle);
@@ -636,12 +655,12 @@ document.addEventListener('DOMContentLoaded', function () {
             if (heatmapToggle && heatmapControls && opacitySlider) {
                 // ALWAYS enable toggle - let it work even if heatmap isn't available yet
                 heatmapToggle.disabled = false;
-                
+
                 // Setup toggle click handler
                 heatmapToggle.addEventListener('change', (e) => {
                     const visible = e.target.checked;
                     console.log(`🎬 Heatmap toggle changed to: ${visible ? '✅ ON' : '❌ OFF'}, actors count: ${heatmapActors.length}`);
-                    
+
                     // Only show controls if heatmap exists
                     if (heatmapActors.length > 0) {
                         heatmapActors.forEach((actor, i) => {
@@ -650,7 +669,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         });
                         heatmapControls.style.display = visible ? 'flex' : 'none';
                         console.log(`   Controls display: ${visible ? 'flex' : 'none'}`);
-                        
+
                         // Force re-render
                         allRenderWindows.forEach((rw, i) => {
                             console.log(`   Rendering window ${i}`);
@@ -715,7 +734,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                     try {
                                         const scalars = heatmapData.getPointData().getScalars();
                                         const dims = heatmapData.getDimensions();
-                                        
+
                                         // Check bounds
                                         if (i >= 0 && i < dims[0] && j >= 0 && j < dims[1] && k >= 0 && k < dims[2]) {
                                             const index = i + j * dims[0] + k * dims[0] * dims[1];
@@ -743,7 +762,7 @@ document.addEventListener('DOMContentLoaded', function () {
                         });
                     }
                 });
-                
+
                 // Log status
                 if (heatmapData && heatmapActors.length > 0) {
                     console.log(`✓ Heatmap system initialized with ${heatmapActors.length} actors`);
@@ -795,11 +814,11 @@ document.addEventListener('DOMContentLoaded', function () {
         console.log('noAnalysisMessage element:', noAnalysisMessage);
 
         // Show/hide analysis content based on data availability
-        const hasValidProbability = eceProbability !== null && 
-                                    eceProbability !== undefined && 
-                                    eceProbability !== 'null' &&
-                                    !isNaN(eceProbability) &&
-                                    eceProbability !== '';
+        const hasValidProbability = eceProbability !== null &&
+            eceProbability !== undefined &&
+            eceProbability !== 'null' &&
+            !isNaN(eceProbability) &&
+            eceProbability !== '';
 
         console.log('hasValidProbability:', hasValidProbability);
 
@@ -809,7 +828,7 @@ document.addEventListener('DOMContentLoaded', function () {
             // Show analysis content, hide no-analysis message
             if (analysisContent) analysisContent.style.display = 'block';
             if (noAnalysisMessage) noAnalysisMessage.style.display = 'none';
-            
+
             console.log('Displaying AI analysis with ECE probability:', eceProbability);
 
             // Update probability value
@@ -821,7 +840,7 @@ document.addEventListener('DOMContentLoaded', function () {
             if (probabilityChart && probabilityChart.getContext) {
                 try {
                     const ctx = probabilityChart.getContext('2d');
-                    
+
                     // Destroy existing chart if it exists
                     const existingChart = Chart.getChart(ctx);
                     if (existingChart) {
@@ -896,7 +915,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                         size: 11
                                     },
                                     callbacks: {
-                                        label: function(context) {
+                                        label: function (context) {
                                             return `${context.label}: ${(context.parsed * 100).toFixed(1)}%`;
                                         }
                                     }
