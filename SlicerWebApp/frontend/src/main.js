@@ -188,12 +188,14 @@ document.addEventListener('DOMContentLoaded', function () {
                 try {
                     updateLoading('Loading AI heatmap overlay...', 4, 5);
                     console.log('🔄 Fetching heatmap from URL:', config.heatmapUrl);
-                    const hResponse = await fetch(config.heatmapUrl);
+                    // Add timestamp to prevent caching of the URL response
+                    const hResponse = await fetch(`${config.heatmapUrl}?t=${new Date().getTime()}`);
                     const hData = await hResponse.json();
                     console.log('📥 Heatmap response:', hData);
                     if (hData.success && hData.heatmap_url) {
                         console.log('📥 Loading heatmap binary from:', hData.heatmap_url);
-                        const hFileContents = await HttpDataAccessHelper.fetchBinary(hData.heatmap_url);
+                        // Add timestamp to prevent caching of the binary file
+                        const hFileContents = await HttpDataAccessHelper.fetchBinary(`${hData.heatmap_url}?t=${new Date().getTime()}`);
                         const hReader = vtkXMLImageDataReader.newInstance();
                         hReader.parseAsArrayBuffer(hFileContents);
                         heatmapData = hReader.getOutputData(0);

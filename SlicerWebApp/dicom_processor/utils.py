@@ -353,15 +353,26 @@ def generate_heatmap(dicom_directory):
         heatmap_np += w * conv_output[:, :, :, i]
 
     heatmap_np = np.maximum(heatmap_np, 0)
+    
+    # Debug: Print heatmap statistics before normalization
+    print(f"Heatmap raw stats - min: {np.min(heatmap_np):.6f}, max: {np.max(heatmap_np):.6f}, mean: {np.mean(heatmap_np):.6f}")
+    
     if np.max(heatmap_np) > 0:
         heatmap_np = heatmap_np / np.max(heatmap_np)
+        
+    # Apply power transformation to boost visibility of lower values
+    # This spreads out the lower values more evenly
+    heatmap_np = np.power(heatmap_np, 0.5)  # Square root to boost low values
+    
+    # Correcting lateral flip (mirroring) issue
+    # Use flip along axis 0 (X-axis) because the heatmap is in (x, y, z) layout here
+    heatmap_np = np.flip(heatmap_np, axis=0) 
+    
+    print(f"Heatmap after normalization & flip - min: {np.min(heatmap_np):.6f}, max: {np.max(heatmap_np):.6f}, mean: {np.mean(heatmap_np):.6f}")
     
     # --- Step 4: Create SITK Image for Heatmap and Resample ---
     # heatmap_np is small (e.g. 11x11x3 or similar, depending on pooling).
     # It corresponds to the 'correct_shape' (90, 90, 25) which is (x, y, z).
-    # Let's resize it back to (90, 90, 25) first?
-    # Or creating an SITK image with physical spacing?
-    
     # Let's treat heatmap_np as a volume covering the full physical extent.
     # We will construct a SITK image from it.
     # Current shape: (x_small, y_small, z_small).
@@ -424,6 +435,10 @@ def generate_heatmap(dicom_directory):
     # Get numpy array (z, y, x)
     heatmap_final_np = sitk.GetArrayFromImage(sitk_heatmap_uint8)
     heatmap_final_np = heatmap_final_np.astype(np.uint8)
+    
+    # Debug: Print final heatmap statistics
+    print(f"Final heatmap uint8 stats - min: {np.min(heatmap_final_np)}, max: {np.max(heatmap_final_np)}, mean: {np.mean(heatmap_final_np):.2f}")
+    print(f"Non-zero voxels: {np.count_nonzero(heatmap_final_np)} / {heatmap_final_np.size} ({100*np.count_nonzero(heatmap_final_np)/heatmap_final_np.size:.2f}%)")
     
     # For VTK, we need to transpose (z, y, x) → (x, y, z) for proper memory ordering
     # VTK ImageData with (x, y, z) dims expects data where x changes fastest in memory
