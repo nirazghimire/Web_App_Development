@@ -62,31 +62,64 @@ def upload_dicom(request):
         form = DicomUploadForm(request.POST, request.FILES)
         files = request.FILES.getlist('dicom_files')
         if form.is_valid():
-            try:
-                first_file = files[0]
-                ds = pydicom.dcmread(first_file, stop_before_pixels=True)
-                series_name = getattr(ds, "SeriesDescription", "Unnamed Series")
-                patient_id = getattr(ds, "PatientID", "")
-                patient_age = getattr(ds, "PatientAge", "")
-                patient_gender = getattr(ds, "PatientSex", "")
-                modality = getattr(ds, "Modality", "")
-            except Exception as e:
-                series_name = "Unnamed Series"
-                patient_id = patient_age = patient_gender = modality = ""
-
             series = DicomSeries.objects.create(
-                name=series_name, user=request.user, patient_id=patient_id,
-                patient_age=patient_age, patient_gender=patient_gender, modality=modality,
+                name="Processing...", user=request.user, 
+                patient_id="", patient_age="", patient_gender="", modality=""
             )
             series_path = os.path.join(settings.MEDIA_ROOT, 'dicom_series', f'series_{series.id}')
             os.makedirs(series_path, exist_ok=True)
             series.file_path = series_path
             series.save(update_fields=['file_path'])
+            
+            saved_files = []
             for f in files:
-                with open(os.path.join(series_path, f.name), 'wb+') as destination:
+                file_dest_path = os.path.join(series_path, f.name)
+                with open(file_dest_path, 'wb+') as destination:
                     for chunk in f.chunks():
                         destination.write(chunk)
-            return redirect('my_uploads')
+                saved_files.append(file_dest_path)
+            
+            # Now scan files to find metadata
+            metadata_found = False
+            files_to_scan = saved_files[:5] # Scan first 5 files
+            
+            for file_path in files_to_scan:
+                if metadata_found: break
+                try:
+                    ds = pydicom.dcmread(file_path, stop_before_pixels=True, force=True)
+                    
+                    # Log all keys to debug
+                    print(f"DEBUG: Scanning {os.path.basename(file_path)} - Available Tags: {ds.dir()}")
+                    
+                    s_desc = getattr(ds, "SeriesDescription", "").strip()
+                    p_id = getattr(ds, "PatientID", "").strip()
+                    p_name = str(getattr(ds, "PatientName", "")).strip()
+                    
+                    # Fallback Logic
+                    series_name = s_desc
+                    if not series_name:
+                         if p_id: series_name = f"Scan ({p_id})"
+                         elif p_name: series_name = f"Scan ({p_name})"
+
+                    if series_name:
+                        series.name = series_name
+                        series.patient_id = p_id
+                        series.patient_age = getattr(ds, "PatientAge", "")
+                        series.patient_gender = getattr(ds, "PatientSex", "")
+                        series.modality = getattr(ds, "Modality", "")
+                        series.save()
+                        print(f"DEBUG: Metadata FOUND in {os.path.basename(file_path)} -> Name: {series_name}")
+                        metadata_found = True
+                    
+                except Exception as e:
+                    print(f"DEBUG: Error reading {os.path.basename(file_path)}: {e}")
+
+            if not metadata_found:
+                 print("DEBUG: No usable metadata found in first 5 files.")
+                 series.name = "Unnamed Series (No Metadata)"
+                 series.save()
+
+            return redirect('dicom_processor:my_uploads')
     else:
         form = DicomUploadForm()
     return render(request, 'dicom_processor/upload.html', {'form': form})
@@ -98,7 +131,7 @@ def delete_dicom(request, series_id):
         if series.file_path and os.path.isdir(series.file_path):
             shutil.rmtree(series.file_path)
         series.delete()
-        return redirect('my_uploads')
+        return redirect('dicom_processor:my_uploads')
     return render(request, 'dicom_processor/my_uploads.html')
 
 # --- Processing Views ---

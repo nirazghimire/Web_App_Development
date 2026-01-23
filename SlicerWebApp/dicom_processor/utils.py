@@ -161,8 +161,22 @@ def generate_heatmap(dicom_directory):
     resampler.SetOutputPixelType(sitk.sitkFloat32)
     sitk_heatmap_resampled = resampler.Execute(sitk_heatmap)
 
-    # === Step 6: Threshold low values (noise reduction) ===
+    # === Step 6: Masking & Thresholding ===
     heatmap_arr = sitk.GetArrayFromImage(sitk_heatmap_resampled)
+    original_arr = sitk.GetArrayFromImage(sitk_original)
+
+    # 1. Anatomical Masking (Remove Air)
+    # Air is approx -1000 HU. We use -700 as a safe threshold to include skin/soft tissue but exclude outside air.
+    # checking shapes just in case, though they should be identical due to resampling
+    if heatmap_arr.shape == original_arr.shape:
+        print("Applying anatomical mask (threshold > -700 HU)...")
+        mask = original_arr > -700
+        heatmap_arr = heatmap_arr * mask
+    else:
+        print(f"Warning: Shape mismatch (Heatmap: {heatmap_arr.shape} vs Original: {original_arr.shape}). Skipping mask.")
+
+    # 2. Threshold low confidence values (Noise Reduction)
+    # We still keep a small threshold to clean up very low model activations inside the body
     threshold = np.percentile(heatmap_arr[heatmap_arr > 0], 10) if np.any(heatmap_arr > 0) else 0
     heatmap_arr[heatmap_arr < threshold] = 0
     

@@ -104,10 +104,10 @@ document.addEventListener('DOMContentLoaded', function () {
         // Heatmap opacity transfer function (low values transparent)
         const heatmapOfun = vtkPiecewiseFunction.newInstance();
         heatmapOfun.addPoint(0, 0.0);
-        heatmapOfun.addPoint(70, 0.0);   // Hide noise (approx below 27%)
-        heatmapOfun.addPoint(100, 0.2);  // Soft fade-in
-        heatmapOfun.addPoint(180, 0.5);
-        heatmapOfun.addPoint(255, 0.85); // Strong visibility for peaks
+        heatmapOfun.addPoint(120, 0.0);   // Hide more background (approx below 47%) - reduces "square" look
+        heatmapOfun.addPoint(160, 0.3);   // Smooth transition
+        heatmapOfun.addPoint(220, 0.7);
+        heatmapOfun.addPoint(255, 0.9);   // High visibility for top risk
 
         // Apply initial colormap
         function applyColormap(name) {
@@ -395,6 +395,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     // Restore Transfer Functions
                     hActor.getProperty().setRGBTransferFunction(0, heatmapCtfun);
                     hActor.getProperty().setScalarOpacity(0, heatmapOfun);
+                    hActor.getProperty().setInterpolationTypeToLinear(); // Ensure smooth gradients
                     hActor.getProperty().setOpacity(1.0);
 
                     // CRITICAL: Offset the heatmap towards the camera to render in front
