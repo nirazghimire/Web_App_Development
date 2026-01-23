@@ -108,25 +108,29 @@ def process_dicom(request, series_id):
     if request.method == 'POST':
         try:
             print(f"--- Starting processing for Series ID: {series.id} ---")
-            heatmap_vti_file_path, prediction_score = generate_heatmap(series.file_path)
-            ece_prob = prediction_score if prediction_score is not None else 0.0
             
+            # Generate AI heatmap and get ECE probability
+            heatmap_vti_path, ece_probability = generate_heatmap(series.file_path)
+            
+            # Convert DICOM to NRRD for volume viewing
             nrrd_dir = os.path.join(settings.MEDIA_ROOT, "nrrd_files")
             os.makedirs(nrrd_dir, exist_ok=True)
             nrrd_path = os.path.join(nrrd_dir, f"user{series.user.id}_series{series.id}.nrrd")
             convert_dicom_series_to_nrrd(series.file_path, nrrd_path)
             
+            # Get slice counts
             volume, _, _ = load_scan_as_3d_volume(series.file_path)
             slice_counts = {'axial': volume.shape[0], 'coronal': volume.shape[1], 'sagittal': volume.shape[2]} if volume is not None else {}
             
+            # Save processing result
             ProcessingResult.objects.update_or_create(
                 dicom_series=series,
                 defaults={
                     'result_type': 'heatmap_and_prediction',
-                    'heatmap_vti_path': heatmap_vti_file_path,
+                    'heatmap_vti_path': heatmap_vti_path,
                     'nrrd_file_path': nrrd_path,
-                    'ece_probability': ece_prob,
-                    'non_ece_probability': 1.0 - ece_prob,
+                    'ece_probability': ece_probability if ece_probability is not None else 0.0,
+                    'non_ece_probability': (1.0 - ece_probability) if ece_probability is not None else 1.0,
                     'slice_counts_json': json.dumps(slice_counts)
                 }
             )
@@ -161,8 +165,10 @@ def get_volume_url(request, series_id):
         traceback.print_exc()
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
 
+
 @login_required
 def get_heatmap_url(request, series_id):
+    """AJAX view to return the heatmap VTI file URL."""
     series = get_object_or_404(DicomSeries, id=series_id, user=request.user)
     try:
         result = series.processing_result
@@ -178,6 +184,7 @@ def get_heatmap_url(request, series_id):
     except Exception as e:
         traceback.print_exc()
         return JsonResponse({'success': False, 'error': str(e)}, status=500)
+
 
 # --- ADDING THIS FUNCTION BACK IN ---
 def get_slice_url_ajax(request):

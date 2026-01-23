@@ -18,6 +18,7 @@ import HttpDataAccessHelper from '@kitware/vtk.js/IO/Core/DataAccessHelper/HttpD
 import vtkPolyData from '@kitware/vtk.js/Common/DataModel/PolyData';
 import vtkActor from '@kitware/vtk.js/Rendering/Core/Actor';
 import vtkMapper from '@kitware/vtk.js/Rendering/Core/Mapper';
+import vtkLookupTable from '@kitware/vtk.js/Common/Core/LookupTable';
 
 import vtkPicker from '@kitware/vtk.js/Rendering/Core/Picker';
 
@@ -38,8 +39,8 @@ document.addEventListener('DOMContentLoaded', function () {
         const loadingOverlay = document.getElementById('loadingOverlay');
         const allRenderWindows = [];
         const sliceMappers = {}; // Base image mappers
-        const heatmapMappers = {}; // Heatmap mappers
-        const heatmapActors = []; // Keep track of all heatmap actors to toggle visibility/opacity
+        const heatmapMappers = {}; // Heatmap overlay mappers
+        const heatmapActors = []; // All heatmap actors for visibility/opacity control
 
         // Crosshair Storage
         const crosshairActors = {}; // { axis: { h: actor, v: actor } }
@@ -52,46 +53,27 @@ document.addEventListener('DOMContentLoaded', function () {
         const axialSliceLabel = document.getElementById('axialSliceLabel');
         const resetButton = document.getElementById('resetViewsButton');
 
-        // --- Heatmap Color Functions ---
-        const heatmapCtfun = vtkColorTransferFunction.newInstance();
-        // "Jet" / Rainbow colormap: Blue -> Cyan -> Green -> Yellow -> Red
-        // Optimized for medical imaging with better contrast
-        heatmapCtfun.addRGBPoint(0, 0, 0, 0);            // Black - no attention
-        heatmapCtfun.addRGBPoint(50, 0.0, 0.0, 0.8);     // Dark Blue
-        heatmapCtfun.addRGBPoint(100, 0.0, 0.5, 1.0);    // Cyan-Blue
-        heatmapCtfun.addRGBPoint(150, 0.0, 1.0, 0.5);    // Cyan-Green
-        heatmapCtfun.addRGBPoint(180, 0.5, 1.0, 0.0);    // Yellow-Green
-        heatmapCtfun.addRGBPoint(210, 1.0, 1.0, 0.0);    // Bright Yellow
-        heatmapCtfun.addRGBPoint(240, 1.0, 0.5, 0.0);    // Orange
-        heatmapCtfun.addRGBPoint(255, 1.0, 0.0, 0.0);    // Bright Red - highest attention
-
-        const heatmapOfun = vtkPiecewiseFunction.newInstance();
-        heatmapOfun.addPoint(0, 0.0);         // Fully transparent at 0
-        heatmapOfun.addPoint(50, 0.1);        // Start to show
-        heatmapOfun.addPoint(150, 0.4);       // Medium opacity
-        heatmapOfun.addPoint(255, 0.6);       // Max opacity (default 50%)
-
         // --- COLORMAP PRESETS ---
         const colormapPresets = {
             viridis: {
                 points: [
                     [0, 0.267004, 0.004874, 0.329415],
-                    [64, 0.282623, 0.140461, 0.469165],
-                    [128, 0.253935, 0.265254, 0.529983],
-                    [192, 0.206756, 0.371758, 0.553806],
+                    [64, 0.282623, 0.140926, 0.457517],
+                    [128, 0.127568, 0.566949, 0.550556],
+                    [192, 0.369214, 0.788888, 0.382914],
                     [255, 0.993248, 0.906157, 0.143936]
                 ],
-                gradient: 'linear-gradient(to right, #440154, #31688e, #35b779, #fde724)'
+                gradient: 'linear-gradient(to right, #440154, #3b528b, #21908d, #5dc863, #fde725)'
             },
-            jet: {
+            plasma: {
                 points: [
-                    [0, 0, 0, 0.5],
-                    [64, 0, 0.5, 1],
-                    [128, 0, 1, 0.5],
-                    [192, 0.5, 1, 0],
-                    [255, 1, 0.5, 0]
+                    [0, 0.050383, 0.029803, 0.527975],
+                    [64, 0.417642, 0.000564, 0.658390],
+                    [128, 0.798216, 0.280197, 0.469538],
+                    [192, 0.976435, 0.582842, 0.255561],
+                    [255, 0.940015, 0.975158, 0.131326]
                 ],
-                gradient: 'linear-gradient(to right, #0000ff, #00ffff, #00ff00, #ffff00, #ff0000)'
+                gradient: 'linear-gradient(to right, #0d0887, #7e03a8, #cc4778, #f89540, #f0f921)'
             },
             hot: {
                 points: [
@@ -102,57 +84,45 @@ document.addEventListener('DOMContentLoaded', function () {
                 ],
                 gradient: 'linear-gradient(to right, #000000, #800000, #ff8000, #ffffff)'
             },
-            cool: {
-                points: [
-                    [0, 0, 1, 1],
-                    [128, 0.5, 0.5, 1],
-                    [255, 1, 0, 1]
-                ],
-                gradient: 'linear-gradient(to right, #00ffff, #8080ff, #ff00ff)'
-            },
-            plasma: {
-                points: [
-                    [0, 0.050383, 0.029803, 0.529975],
-                    [64, 0.282623, 0.140461, 0.469165],
-                    [128, 0.940015, 0.375966, 0.131028],
-                    [192, 0.951564, 0.925701, 0.131368],
-                    [255, 0.940015, 0.975251, 0.131028]
-                ],
-                gradient: 'linear-gradient(to right, #0d0887, #7d03a8, #ec8902, #f89540, #f0f921)'
-            },
-            inferno: {
-                points: [
-                    [0, 0.001462, 0.000466, 0.013866],
-                    [64, 0.282623, 0.140461, 0.469165],
-                    [128, 0.865732, 0.317254, 0.226051],
-                    [192, 0.988362, 0.998364, 0.644924],
-                    [255, 0.988362, 0.998364, 0.644924]
-                ],
-                gradient: 'linear-gradient(to right, #000004, #420a68, #932667, #fca238, #fcfea4)'
-            },
             turbo: {
                 points: [
                     [0, 0.18995, 0.07176, 0.23217],
-                    [64, 0.05175, 0.29803, 0.90326],
-                    [128, 0.40567, 0.80353, 0.71671],
-                    [192, 0.84159, 0.37514, 0.08406],
-                    [255, 0.88771, 0.08217, 0.14033]
+                    [64, 0.09140, 0.40830, 0.92540],
+                    [128, 0.28647, 0.86765, 0.50068],
+                    [192, 0.87819, 0.67555, 0.11765],
+                    [255, 0.69350, 0.09450, 0.12000]
                 ],
-                gradient: 'linear-gradient(to right, #30123b, #0571b0, #48c642, #f7cb45, #e63e1b)'
-            },
-            magma: {
-                points: [
-                    [0, 0.001462, 0.000466, 0.013866],
-                    [64, 0.218959, 0.090838, 0.389348],
-                    [128, 0.666852, 0.236988, 0.385799],
-                    [192, 0.987053, 0.906157, 0.143936],
-                    [255, 0.987053, 0.991438, 0.749504]
-                ],
-                gradient: 'linear-gradient(to right, #000004, #3b0f6f, #8c2980, #fcfdbf, #fcfdbf)'
+                gradient: 'linear-gradient(to right, #30123b, #1760a0, #45c16f, #e0b826, #b11516)'
             }
         };
 
-        let currentColormap = 'viridis'; // Track current colormap
+        let currentColormap = 'viridis';
+
+        // Heatmap color transfer function
+        const heatmapCtfun = vtkColorTransferFunction.newInstance();
+
+        // Heatmap opacity transfer function (low values transparent)
+        const heatmapOfun = vtkPiecewiseFunction.newInstance();
+        heatmapOfun.addPoint(0, 0.0);
+        heatmapOfun.addPoint(70, 0.0);   // Hide noise (approx below 27%)
+        heatmapOfun.addPoint(100, 0.2);  // Soft fade-in
+        heatmapOfun.addPoint(180, 0.5);
+        heatmapOfun.addPoint(255, 0.85); // Strong visibility for peaks
+
+        // Apply initial colormap
+        function applyColormap(name) {
+            const preset = colormapPresets[name];
+            if (!preset) return;
+
+            heatmapCtfun.removeAllPoints();
+            preset.points.forEach(p => heatmapCtfun.addRGBPoint(p[0], p[1], p[2], p[3]));
+
+            const gradientEl = document.getElementById('colormapGradient');
+            if (gradientEl) gradientEl.style.background = preset.gradient;
+
+            currentColormap = name;
+        }
+        applyColormap('hot');
 
         // Helper function to update loading message
         function updateLoading(message, step = null, total = null) {
@@ -181,59 +151,64 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const imageData = reader.getOutputData(0);
 
-            // --- Load Heatmap Data if available ---
-            let heatmapData = null;
-            console.log('Heatmap loading: config.heatmapUrl =', config.heatmapUrl);
-            if (config.heatmapUrl) {
-                try {
-                    updateLoading('Loading AI heatmap overlay...', 4, 5);
-                    console.log('🔄 Fetching heatmap from URL:', config.heatmapUrl);
-                    // Add timestamp to prevent caching of the URL response
-                    const hResponse = await fetch(`${config.heatmapUrl}?t=${new Date().getTime()}`);
-                    const hData = await hResponse.json();
-                    console.log('📥 Heatmap response:', hData);
-                    if (hData.success && hData.heatmap_url) {
-                        console.log('📥 Loading heatmap binary from:', hData.heatmap_url);
-                        // Add timestamp to prevent caching of the binary file
-                        const hFileContents = await HttpDataAccessHelper.fetchBinary(`${hData.heatmap_url}?t=${new Date().getTime()}`);
-                        const hReader = vtkXMLImageDataReader.newInstance();
-                        hReader.parseAsArrayBuffer(hFileContents);
-                        heatmapData = hReader.getOutputData(0);
-
-                        // Validate heatmap dimensions match original volume
-                        if (heatmapData) {
-                            const heatmapDims = heatmapData.getDimensions();
-                            const volumeDims = imageData.getDimensions();
-                            console.log('✅ Heatmap loaded successfully. Dimensions:', heatmapDims);
-                            console.log('   Volume dimensions:', volumeDims);
-
-                            // Check for dimension mismatch
-                            if (heatmapDims[0] !== volumeDims[0] ||
-                                heatmapDims[1] !== volumeDims[1] ||
-                                heatmapDims[2] !== volumeDims[2]) {
-                                console.warn('⚠️  Heatmap dimensions do not match volume dimensions. This may cause alignment issues.');
-                            }
-                        }
-                    } else {
-                        console.warn('⚠️  Heatmap URL missing or request unsuccessful:', hData);
-                    }
-                } catch (e) {
-                    console.error("❌ Failed to load heatmap:", e);
-                    // Continue without heatmap
-                }
-            } else {
-                console.log('ℹ️  No heatmapUrl in config - heatmap disabled for this series');
-            }
-
-            updateLoading('Setting up 3D visualization...', 5, 5);
-
+            // Extract volume geometry early so we can compare with heatmap
             const bounds = imageData.getBounds(); // [xmin, xmax, ymin, ymax, zmin, zmax]
             const center = imageData.getCenter();
             const dims = imageData.getDimensions();
             const spacing = imageData.getSpacing();
             const origin = imageData.getOrigin();
 
-            // ... (Heatmap loading logic) ...
+            console.log('📦 Volume geometry: dims=', dims, 'spacing=', spacing, 'origin=', origin);
+
+            // --- Load Heatmap Data if available ---
+            let heatmapData = null;
+            console.log('🔍 DEBUG: config.heatmapUrl =', config.heatmapUrl);
+            if (config.heatmapUrl) {
+                try {
+                    updateLoading('Loading attention overlay...', 4, 5);
+                    console.log('🔄 Fetching heatmap endpoint:', config.heatmapUrl);
+                    const hResponse = await fetch(config.heatmapUrl);
+                    const hData = await hResponse.json();
+                    console.log('📥 Heatmap AJAX response:', hData);
+                    if (hData.success && hData.heatmap_url) {
+                        console.log('⬇️ Downloading heatmap binary from:', hData.heatmap_url);
+                        const hBinary = await HttpDataAccessHelper.fetchBinary(hData.heatmap_url);
+                        console.log('📦 Heatmap binary size:', hBinary.byteLength, 'bytes');
+                        const hReader = vtkXMLImageDataReader.newInstance();
+                        hReader.parseAsArrayBuffer(hBinary);
+                        heatmapData = hReader.getOutputData(0);
+
+                        // force heatmap to match volume geometry EXACTLY
+                        // This fixes the issue where heatmap origin is different from volume origin
+                        console.log('⚠️ OVERRIDING HEATMAP GEOMETRY TO MATCH VOLUME');
+                        heatmapData.setOrigin(imageData.getOrigin());
+                        heatmapData.setSpacing(imageData.getSpacing());
+                        heatmapData.setDirection(imageData.getDirection());
+
+                        console.log('✅ Heatmap loaded.');
+
+                        // Check scalar range
+                        const scalars = heatmapData.getPointData().getScalars();
+                        if (scalars) {
+                            const range = scalars.getRange();
+                            console.log('📊 Heatmap scalar range:', range);
+                            if (range[1] === 0) {
+                                console.error('❌ CRITICAL: Heatmap max value is 0 - NO DATA!');
+                            }
+                        }
+                    } else {
+                        console.warn('⚠️ Heatmap AJAX failed or no URL:', hData);
+                    }
+                } catch (e) {
+                    console.error('❌ Failed to load heatmap:', e);
+                }
+            } else {
+                console.log('ℹ️ No heatmapUrl in config - heatmap disabled');
+            }
+
+            updateLoading('Setting up 3D visualization...', 5, 5);
+
+            // Geometry variables (bounds, center, dims, spacing, origin) are already defined above
 
             // --- CROSSHAIR HELPER ---
             function createCrosshairActor(orientationAxis) {
@@ -337,7 +312,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Set flag to prevent slider input events
                 isUpdatingSliders = true;
 
-                // Update Base Mappers (keep existing)
+                // Update Base Mappers
                 if (sliceMappers[0] && i >= 0 && i < dims[0]) {
                     sliceMappers[0].setSlice(i);
                     sagittalSlider.value = i;
@@ -354,7 +329,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     axialSliceLabel.textContent = k;
                 }
 
-                // Update Heatmap Mappers (keep existing)
+                // Update Heatmap Mappers (keep synced with base)
                 if (heatmapMappers[0]) heatmapMappers[0].setSlice(i);
                 if (heatmapMappers[1]) heatmapMappers[1].setSlice(j);
                 if (heatmapMappers[2]) heatmapMappers[2].setSlice(k);
@@ -363,7 +338,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 updateCrosshairs(i, j, k);
 
                 allRenderWindows.forEach(rw => {
-                    // rw.getRenderer().resetCameraClippingRange(); // Optional: might be too expensive to do every frame?
                     rw.getRenderWindow().render();
                 });
 
@@ -407,30 +381,41 @@ document.addEventListener('DOMContentLoaded', function () {
                 slice.getProperty().setColorLevel(40);
                 renderer.addActor(slice);
 
-                // Heatmap Slice (Overlay)
+                // Heatmap Overlay (if available)
                 if (heatmapData) {
-                    try {
-                        const hMapper = vtkImageMapper.newInstance();
-                        hMapper.setInputData(heatmapData);
-                        hMapper.setSlicingMode(viewConfig.axis);
-                        heatmapMappers[viewConfig.axis] = hMapper;
+                    console.log(`🎨 Creating heatmap overlay for ${viewConfig.id} (axis ${viewConfig.axis})`);
+                    const hMapper = vtkImageMapper.newInstance();
+                    hMapper.setInputData(heatmapData);
+                    hMapper.setSlicingMode(viewConfig.axis);
+                    heatmapMappers[viewConfig.axis] = hMapper;
 
-                        const hActor = vtkImageSlice.newInstance();
-                        hActor.setMapper(hMapper);
-                        hActor.getProperty().setRGBTransferFunction(heatmapCtfun);
-                        hActor.getProperty().setScalarOpacity(heatmapOfun);
-                        hActor.getProperty().setOpacity(0.5); // Initial opacity (50%)
-                        hActor.setVisibility(false); // Hidden by default
+                    const hActor = vtkImageSlice.newInstance();
+                    hActor.setMapper(hMapper);
 
-                        renderer.addActor(hActor);
-                        heatmapActors.push(hActor);
-                        console.log(`✓ Heatmap overlay created for ${viewConfig.id} (actor #${heatmapActors.length})`);
-                        console.log(`  Heatmap dims: ${heatmapData.getDimensions()}, Volume dims: ${imageData.getDimensions()}`);
-                    } catch (e) {
-                        console.error(`✗ Failed to add heatmap overlay to ${viewConfig.id}:`, e);
+                    // Restore Transfer Functions
+                    hActor.getProperty().setRGBTransferFunction(0, heatmapCtfun);
+                    hActor.getProperty().setScalarOpacity(0, heatmapOfun);
+                    hActor.getProperty().setOpacity(1.0);
+
+                    // CRITICAL: Offset the heatmap towards the camera to render in front
+                    // Larger offset to ensure it's clearly in front
+                    const offsetAmount = 1.0; // 1mm offset
+                    const pos = [0, 0, 0];
+                    // Camera positions: axis0 looks from -X, axis1 from -Y, axis2 from +Z
+                    switch (viewConfig.axis) {
+                        case 0: pos[0] = -offsetAmount; break; // Sagittal: offset towards -X (camera)
+                        case 1: pos[1] = -offsetAmount; break; // Coronal: offset towards -Y (camera)
+                        case 2: pos[2] = offsetAmount; break;  // Axial: offset towards +Z (camera)
                     }
+                    hActor.setPosition(pos);
+                    console.log(`   Heatmap position offset: [${pos.join(', ')}]`);
+
+                    hActor.setVisibility(false); // Hidden by default
+                    renderer.addActor(hActor);
+                    heatmapActors.push(hActor);
+                    console.log(`✅ Heatmap actor added. Total actors: ${heatmapActors.length}`);
                 } else {
-                    console.log(`⚠ No heatmap data available for ${viewConfig.id}`);
+                    console.log(`⚠️ No heatmap data for ${viewConfig.id}`);
                 }
 
                 // Add Crosshair Actor for this view
@@ -461,21 +446,13 @@ document.addEventListener('DOMContentLoaded', function () {
                     updateAllSlices(i, j, k);
                 });
                 interactor.onLeftButtonPress((event) => {
-                    console.log(`=== LEFT CLICK on ${viewConfig.id} ===`);
-                    console.log('Event:', event);
                     const pos = event.position;
-                    console.log('Mouse position:', pos);
-
                     picker.initialize();
                     picker.pick([pos.x, pos.y, 0.0], renderer);
-                    console.log('Picker actors found:', picker.getActors().length);
 
                     if (picker.getActors().length > 0) {
                         const pickedPoint = picker.getPickPosition();
-                        console.log('Picked point (world coords):', pickedPoint);
-
                         const worldToIndex = imageData.worldToIndex(pickedPoint);
-                        console.log('World to index result:', worldToIndex);
 
                         let i = Math.round(worldToIndex[0]);
                         let j = Math.round(worldToIndex[1]);
@@ -487,40 +464,27 @@ document.addEventListener('DOMContentLoaded', function () {
                         const currentJ = sliceMappers[1].getSlice();
                         const currentK = sliceMappers[2].getSlice();
 
-                        console.log(`Picked indices before correction: i=${i}, j=${j}, k=${k}`);
-                        console.log(`Current slices: i=${currentI}, j=${currentJ}, k=${currentK}`);
-
                         // Based on view orientation, keep the perpendicular axis unchanged
                         switch (viewConfig.axis) {
                             case 0: // Sagittal view: shows Y-Z plane, keep X unchanged
                                 i = currentI;
-                                console.log('Sagittal view: keeping i (X) = ' + i);
                                 break;
                             case 1: // Coronal view: shows X-Z plane, keep Y unchanged
                                 j = currentJ;
-                                console.log('Coronal view: keeping j (Y) = ' + j);
                                 break;
                             case 2: // Axial view: shows X-Y plane, keep Z unchanged
                                 k = currentK;
-                                console.log('Axial view: keeping k (Z) = ' + k);
                                 break;
                         }
 
-                        console.log(`Final indices: i=${i}, j=${j}, k=${k}`);
-                        console.log(`Current slices before update: i=${sliceMappers[0]?.getSlice()}, j=${sliceMappers[1]?.getSlice()}, k=${sliceMappers[2]?.getSlice()}`);
-
                         updateAllSlices(i, j, k);
 
-                        console.log(`Current slices after update: i=${sliceMappers[0]?.getSlice()}, j=${sliceMappers[1]?.getSlice()}, k=${sliceMappers[2]?.getSlice()}`);
-                        console.log(`Slider values after update: sagittal=${sagittalSlider.value}, coronal=${coronalSlider.value}, axial=${axialSlider.value}`);
-
                         // Prevent default interactor behavior from interfering
-                        event.callData.handled = true;
-                        console.log('✓ Event handled');
-                    } else {
-                        console.log('✗ No actors picked');
+                        // Check if callData exists before setting handled
+                        if (event && event.callData) {
+                            event.callData.handled = true;
+                        }
                     }
-                    console.log('=== END CLICK ===\n');
                 });
                 renWin.getRenderWindow().render();
             });
@@ -589,194 +553,63 @@ document.addEventListener('DOMContentLoaded', function () {
                 updateAllSlices(sliceMappers[0].getSlice(), sliceMappers[1].getSlice(), k);
             });
 
-            // --- Heatmap Controls ---
+            // --- Heatmap Control Handlers ---
             const heatmapToggle = document.getElementById('heatmapToggle');
             const heatmapControls = document.getElementById('heatmapControls');
             const opacitySlider = document.getElementById('opacitySlider');
+            const opacityValueEl = document.getElementById('opacityValue');
             const colormapSelect = document.getElementById('colormapSelect');
-            const heatmapValueReadout = document.getElementById('heatmapValueReadout');
-            const colormapGradient = document.getElementById('colormapGradient');
 
-            // Debug: Log heatmap setup status
-            console.log('=== HEATMAP SETUP DEBUG ===');
-            console.log('heatmapToggle element:', heatmapToggle);
-            console.log('heatmapControls element:', heatmapControls);
-            console.log('opacitySlider element:', opacitySlider);
-            console.log('colormapSelect element:', colormapSelect);
-            console.log('heatmapValueReadout element:', heatmapValueReadout);
-            console.log('colormapGradient element:', colormapGradient);
-            console.log('heatmapData loaded:', !!heatmapData);
-            console.log('heatmapActors count:', heatmapActors.length);
-            console.log('=== END DEBUG ===');
-
-            // Function to update colormap across all heatmap actors
-            function setColormap(colormapName) {
-                const preset = colormapPresets[colormapName];
-                if (!preset) {
-                    console.warn(`Unknown colormap: ${colormapName}`);
-                    return;
-                }
-
-                console.log(`Switching colormap to: ${colormapName}`);
-
-                // Clear existing color points
-                heatmapCtfun.removeAllPoints();
-
-                // Add new color points from preset
-                preset.points.forEach(point => {
-                    heatmapCtfun.addRGBPoint(point[0], point[1], point[2], point[3]);
-                });
-
-                // Update legend gradient
-                if (colormapGradient) {
-                    colormapGradient.style.background = preset.gradient;
-                }
-
-                // Update all heatmap actors with new color function
-                heatmapActors.forEach(actor => {
-                    actor.getProperty().setRGBTransferFunction(heatmapCtfun);
-                });
-
-                // Update scalar opacity function for better visibility
-                heatmapOfun.removeAllPoints();
-                heatmapOfun.addPoint(0, 0.0);         // Fully transparent at 0
-                heatmapOfun.addPoint(50, 0.1);        // Start to show
-                heatmapOfun.addPoint(150, 0.4);       // Medium opacity
-                heatmapOfun.addPoint(255, 0.6);       // Max opacity
-
-                heatmapActors.forEach(actor => {
-                    actor.getProperty().setScalarOpacity(heatmapOfun);
-                });
-
-                currentColormap = colormapName;
-
-                // Re-render all views
-                allRenderWindows.forEach(rw => rw.getRenderWindow().render());
-            }
-
-            if (heatmapToggle && heatmapControls && opacitySlider) {
-                // ALWAYS enable toggle - let it work even if heatmap isn't available yet
-                heatmapToggle.disabled = false;
-
-                // Setup toggle click handler
+            if (heatmapToggle) {
                 heatmapToggle.addEventListener('change', (e) => {
                     const visible = e.target.checked;
-                    console.log(`🎬 Heatmap toggle changed to: ${visible ? '✅ ON' : '❌ OFF'}, actors count: ${heatmapActors.length}`);
-
-                    // Only show controls if heatmap exists
-                    if (heatmapActors.length > 0) {
-                        heatmapActors.forEach((actor, i) => {
-                            actor.setVisibility(visible);
-                            console.log(`   Actor ${i}: visibility = ${visible}`);
-                        });
-                        heatmapControls.style.display = visible ? 'flex' : 'none';
-                        console.log(`   Controls display: ${visible ? 'flex' : 'none'}`);
-
-                        // Force re-render
-                        allRenderWindows.forEach((rw, i) => {
-                            console.log(`   Rendering window ${i}`);
-                            rw.getRenderWindow().render();
-                        });
-                    } else {
-                        console.warn('⚠️  Heatmap toggle clicked but no heatmap actors available');
-                        // Don't show controls if no heatmap
-                        heatmapControls.style.display = 'none';
-                    }
-                });
-
-                // Setup opacity slider
-                opacitySlider.addEventListener('input', (e) => {
-                    const opacity = parseFloat(e.target.value);
-                    if (heatmapActors.length > 0) {
-                        heatmapActors.forEach(actor => actor.getProperty().setOpacity(opacity));
-
-                        // Opacity changes are cheap, but 3x render might be heavy. 
-                        // Using requestAnimationFrame ensures we don't render more than 60fps.
-                        requestAnimationFrame(() => {
-                            allRenderWindows.forEach(rw => rw.getRenderWindow().render());
-                        });
-                    }
-                });
-
-                // Setup colormap selector
-                if (colormapSelect) {
-                    colormapSelect.addEventListener('change', (e) => {
-                        if (heatmapActors.length > 0) {
-                            setColormap(e.target.value);
-                        }
+                    heatmapActors.forEach((actor) => {
+                        actor.setVisibility(visible);
                     });
-                }
 
-                // Setup hover handler for heatmap values
-                allRenderWindows.forEach((renWin, idx) => {
-                    const domElement = renWin.getContainer();
-                    if (domElement) {
-                        domElement.addEventListener('mousemove', (event) => {
-                            if (!heatmapToggle.checked || !heatmapData || heatmapActors.length === 0) return;
-
-                            const rect = domElement.getBoundingClientRect();
-                            const x = event.clientX - rect.left;
-                            const y = event.clientY - rect.top;
-
-                            // Try to pick at this position
-                            try {
-                                const picker2 = vtkPicker.newInstance();
-                                picker2.setTolerance(0.005);
-                                picker2.initialize();
-                                picker2.pick([x, y, 0.0], renWin.getRenderer());
-
-                                if (picker2.getActors().length > 0) {
-                                    const pickedPoint = picker2.getPickPosition();
-                                    const worldToIndex = heatmapData.worldToIndex(pickedPoint);
-                                    const i = Math.round(worldToIndex[0]);
-                                    const j = Math.round(worldToIndex[1]);
-                                    const k = Math.round(worldToIndex[2]);
-
-                                    // Get the actual scalar value from heatmap data
-                                    try {
-                                        const scalars = heatmapData.getPointData().getScalars();
-                                        const dims = heatmapData.getDimensions();
-
-                                        // Check bounds
-                                        if (i >= 0 && i < dims[0] && j >= 0 && j < dims[1] && k >= 0 && k < dims[2]) {
-                                            const index = i + j * dims[0] + k * dims[0] * dims[1];
-                                            if (index >= 0 && index < scalars.getNumberOfTuples()) {
-                                                const value = scalars.getValue(index);
-                                                if (heatmapValueReadout) {
-                                                    heatmapValueReadout.textContent = `${value.toFixed(2)}`;
-                                                }
-                                            }
-                                        }
-                                    } catch (e) {
-                                        // Silently fail if unable to read value
-                                    }
-                                }
-                            } catch (e) {
-                                // Silently fail picker
-                            }
-                        });
-
-                        // Reset display on mouse leave
-                        domElement.addEventListener('mouseleave', () => {
-                            if (heatmapValueReadout) {
-                                heatmapValueReadout.textContent = '--';
-                            }
-                        });
+                    if (heatmapControls) {
+                        heatmapControls.style.display = visible ? 'block' : 'none';
                     }
+
+                    allRenderWindows.forEach((rw) => {
+                        rw.getRenderWindow().render();
+                    });
                 });
 
-                // Log status
-                if (heatmapData && heatmapActors.length > 0) {
-                    console.log(`✓ Heatmap system initialized with ${heatmapActors.length} actors`);
-                } else {
-                    console.warn(`⚠ Heatmap controls enabled but no data loaded. heatmapData: ${!!heatmapData}, actors: ${heatmapActors.length}`);
+                // Disable toggle if no heatmap data
+                if (heatmapActors.length === 0) {
+                    heatmapToggle.disabled = true;
+                    heatmapToggle.parentElement.title = 'No attention data available';
                 }
             } else {
-                console.warn("Heatmap control elements not found in DOM");
+                console.error('❌ heatmapToggle element not found!');
+            }
+
+            if (opacitySlider) {
+                opacitySlider.addEventListener('input', (e) => {
+                    const opacity = parseFloat(e.target.value);
+                    if (opacityValueEl) opacityValueEl.textContent = Math.round(opacity * 100) + '%';
+                    heatmapActors.forEach(actor => actor.getProperty().setOpacity(opacity));
+                    requestAnimationFrame(() => {
+                        allRenderWindows.forEach(rw => rw.getRenderWindow().render());
+                    });
+                });
+            }
+
+            if (colormapSelect) {
+                colormapSelect.addEventListener('change', (e) => {
+                    applyColormap(e.target.value);
+                    heatmapActors.forEach(actor => {
+                        actor.getProperty().setRGBTransferFunction(heatmapCtfun);
+                    });
+                    allRenderWindows.forEach(rw => rw.getRenderWindow().render());
+                });
             }
 
             resetButton.addEventListener('click', resetViews);
             resetViews();
+
+
 
             loadingOverlay.style.display = 'none';
             allRenderWindows.forEach(r => r.resize());
