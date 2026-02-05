@@ -22,6 +22,10 @@ import vtkLookupTable from '@kitware/vtk.js/Common/Core/LookupTable';
 
 import vtkPicker from '@kitware/vtk.js/Rendering/Core/Picker';
 
+import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
+import vtkLineWidget from '@kitware/vtk.js/Widgets/Widgets3D/LineWidget';
+import vtkSplineWidget from '@kitware/vtk.js/Widgets/Widgets3D/SplineWidget';
+import vtkPlanePointManipulator from '@kitware/vtk.js/Widgets/Manipulators/PlaneManipulator';
 import Chart from 'chart.js/auto';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
 Chart.register(ChartDataLabels);
@@ -366,6 +370,11 @@ document.addEventListener('DOMContentLoaded', function () {
             sliceViewConfigs.forEach(viewConfig => {
                 const renWin = vtkGenericRenderWindow.newInstance({ background: [0, 0, 0] });
                 renWin.setContainer(document.getElementById(viewConfig.id));
+                // Set interactor style to Image (2D) for slice views
+                const sliceInteractorStyle = vtkInteractorStyleImage.newInstance();
+                sliceInteractorStyle.setInteractionMode('IMAGE_SLICING'); // Ensure slicing mode
+                renWin.getInteractor().setInteractorStyle(sliceInteractorStyle);
+
                 allRenderWindows.push(renWin);
                 const renderer = renWin.getRenderer();
                 const camera = renderer.getActiveCamera();
@@ -379,6 +388,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 slice.setMapper(sliceMapper);
                 slice.getProperty().setColorWindow(400);
                 slice.getProperty().setColorLevel(40);
+                slice.setPickable(true); // Ensure main slice is pickable
                 renderer.addActor(slice);
 
                 // Heatmap Overlay (if available)
@@ -412,6 +422,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     console.log(`   Heatmap position offset: [${pos.join(', ')}]`);
 
                     hActor.setVisibility(false); // Hidden by default
+                    hActor.setPickable(false); // Heatmap should not block picking
                     renderer.addActor(hActor);
                     heatmapActors.push(hActor);
                     console.log(`✅ Heatmap actor added. Total actors: ${heatmapActors.length}`);
@@ -421,12 +432,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 // Add Crosshair Actor for this view
                 const ch = createCrosshairActor(viewConfig.axis);
+                ch.actor.setPickable(false); // Crosshairs should not be pickable
                 crosshairActors[viewConfig.axis] = ch;
                 renderer.addActor(ch.actor);
 
                 viewConfig.slider.max = dims[viewConfig.axis] - 1;
-                const iStyle = vtkInteractorStyleImage.newInstance();
-                renWin.getInteractor().setInteractorStyle(iStyle);
+
                 camera.setParallelProjection(true);
                 renderer.resetCamera();
                 switch (viewConfig.axis) {
@@ -610,6 +621,158 @@ document.addEventListener('DOMContentLoaded', function () {
             resetButton.addEventListener('click', resetViews);
             resetViews();
 
+            // --- WIDGET MANAGER SETUP ---
+            const widgetManagers = [];
+            const toolWidgets = {
+                measure: [],
+                pencil: []
+            };
+
+            // Initialize widgets for each view
+            allRenderWindows.forEach((renWin, index) => {
+                // Only add widgets to slice views (0, 1, 2)
+                if (index >= sliceViewConfigs.length) return;
+
+                const viewConfig = sliceViewConfigs[index];
+                const renderer = renWin.getRenderer();
+                const manager = vtkWidgetManager.newInstance();
+                manager.setRenderer(renderer);
+
+                widgetManagers.push(manager);
+
+                // --- LINE WIDGET (Ruler) ---
+                const dWidget = vtkLineWidget.newInstance();
+
+                // Fix Axial View: Explicitly set manipulator plane
+                const manip = vtkPlanePointManipulator.newInstance();
+                switch (viewConfig.axis) {
+                    case 0: manip.setUserNormal(1, 0, 0); break; // Sagittal
+                    case 1: manip.setUserNormal(0, 1, 0); break; // Coronal
+                    case 2: manip.setUserNormal(0, 0, 1); break; // Axial
+                }
+                dWidget.setManipulator(manip);
+
+                const dHandle = manager.addWidget(dWidget);
+                // Reduce handle size and use pixel scaling (remove setHandleSize call)
+                dHandle.getRepresentations()[1].setScaleInPixels(true);
+                dHandle.getRepresentations()[0].setScaleInPixels(true); // also scale the other handle
+
+                // Distance Calculation Logic
+                // Fix: onInteractionEvent is not a function on the widget instance directly in newer vtk.js versions or specific widgets.
+                // We should listen to state changes.
+                const widgetState = dWidget.getWidgetState();
+                widgetState.onModified(() => {
+                    const p1 = widgetState.getHandle1().getOrigin();
+                    const p2 = widgetState.getHandle2().getOrigin();
+                    if (p1 && p2) {
+                        const dx = p1[0] - p2[0];
+                        const dy = p1[1] - p2[1];
+                        const dz = p1[2] - p2[2];
+                        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+                        const display = document.getElementById('distanceDisplay');
+                        if (display) display.textContent = `Distance: ${distance.toFixed(2)} mm`;
+                    }
+                });
+
+                toolWidgets.measure.push({ widget: dWidget, handle: dHandle, manager });
+
+                // --- SPLINE WIDGET (Pencil/Contour) ---
+                const sWidget = vtkSplineWidget.newInstance();
+                sWidget.setManipulator(manip); // Shared manipulator
+
+                const sHandle = manager.addWidget(sWidget);
+                sHandle.setOutputBorder(true);
+                // Reduce handle size
+                sHandle.getRepresentations()[1].setScaleInPixels(true);
+
+                toolWidgets.pencil.push({ widget: sWidget, handle: sHandle, manager });
+            });
+
+            // --- TOOLBAR LOGIC ---
+            const toolInputs = document.querySelectorAll('input[name="toolMode"]');
+            const clearBtn = document.getElementById('clearAnnotationsBtn');
+
+            function updateToolMode() {
+                const checkedInput = document.querySelector('input[name="toolMode"]:checked');
+                const mode = checkedInput ? checkedInput.value : 'none';
+                console.log(`Switching tool mode to: ${mode}`);
+
+                // Disable all first
+                toolWidgets.measure.forEach(item => {
+                    item.handle.setEnabled(false);
+                    item.handle.loseFocus();
+                });
+                toolWidgets.pencil.forEach(item => {
+                    item.handle.setEnabled(false);
+                    item.handle.loseFocus();
+                });
+
+                // Re-enable interactions for the selected mode
+                if (mode === 'measure') {
+                    toolWidgets.measure.forEach(item => {
+                        item.handle.setEnabled(true);
+                        item.manager.enablePicking();
+                        item.handle.grabFocus(); // Critical for capturing events
+                    });
+                } else if (mode === 'pencil') {
+                    toolWidgets.pencil.forEach(item => {
+                        item.handle.setEnabled(true);
+                        item.manager.enablePicking();
+                        item.handle.grabFocus(); // Critical for capturing events
+                    });
+                } else {
+                    // None/View mode
+                    widgetManagers.forEach(m => m.disablePicking());
+                }
+
+                allRenderWindows.forEach(rw => rw.getRenderWindow().render());
+            }
+
+            // Attach listeners
+            toolInputs.forEach(input => {
+                input.addEventListener('change', updateToolMode);
+            });
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', () => {
+                    // Clear all representations
+                    // Implementing a simple clear by removing and re-adding, or just clearing widget state
+                    // For vtk widgets, we often need to reset the state or remove the handle.
+                    // Simpler approach: Clear the lists if the API supports it, 
+                    // OR re-create the widgets. 
+                    // VTK.js widgets can be tricky to "clear". 
+                    // Let's try to just reset their data if possible, or reload.
+                    // The simplest way for MVP is to just tell the widgets to clear their handles.
+
+                    // RELOAD PAGE is the safest "Clear All" for MVP if widget state is complex,
+                    // but let's try to remove handles.
+
+                    if (confirm("Clear all annotations?")) {
+                        toolWidgets.measure.forEach(item => {
+                            // Removing and re-adding is a way to clear
+                            item.manager.removeWidget(item.widget);
+                            // Re-add fresh
+                            const newW = vtkLineWidget.newInstance();
+                            const newH = item.manager.addWidget(newW);
+                            item.widget = newW;
+                            item.handle = newH;
+                        });
+                        toolWidgets.pencil.forEach(item => {
+                            item.manager.removeWidget(item.widget);
+                            const newW = vtkSplineWidget.newInstance();
+                            const newH = item.manager.addWidget(newW);
+                            item.widget = newW;
+                            item.handle = newH;
+                        });
+
+                        updateToolMode(); // Re-apply current mode state
+                    }
+                });
+            }
+
+            // Initialize default mode
+            updateToolMode();
+
 
 
             loadingOverlay.style.display = 'none';
@@ -729,12 +892,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                     padding: 8
                                 },
                                 datalabels: {
-                                    color: '#f8f9fa',
-                                    font: {
-                                        weight: 'bold',
-                                        size: 11
-                                    },
-                                    formatter: (value) => `${(value * 100).toFixed(1)}%`
+                                    display: false
                                 },
                                 tooltip: {
                                     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -752,6 +910,7 @@ document.addEventListener('DOMContentLoaded', function () {
                                     },
                                     callbacks: {
                                         label: function (context) {
+                                            if (!context || !context.parsed) return '';
                                             return `${context.label}: ${(context.parsed * 100).toFixed(1)}%`;
                                         }
                                     }

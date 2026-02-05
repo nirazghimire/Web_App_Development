@@ -136,9 +136,13 @@ def delete_dicom(request, series_id):
 
 # --- Processing Views ---
 @login_required
+@login_required
 def process_dicom(request, series_id):
     series = get_object_or_404(DicomSeries, id=series_id, user=request.user)
+    
     if request.method == 'POST':
+        is_ajax = request.headers.get('x-requested-with') == 'XMLHttpRequest' or 'ajax' in request.POST
+        
         try:
             print(f"--- Starting processing for Series ID: {series.id} ---")
             
@@ -167,16 +171,26 @@ def process_dicom(request, series_id):
                     'slice_counts_json': json.dumps(slice_counts)
                 }
             )
-            messages.success(request, f"Processing complete for '{series.name}'.")
-            return redirect('dicom_processor:dashboard_series_view', series_id=series.id)
-        
-        except FileNotFoundError as e:
-            messages.error(request, f"Processing failed: {e}")
-            return redirect('dicom_processor:process_dicom', series_id=series.id)
+            
+            if is_ajax:
+                from django.urls import reverse
+                target_url = reverse('dicom_processor:dashboard_series_view', kwargs={'series_id': series.id})
+                return JsonResponse({'success': True, 'redirect_url': target_url})
+            else:
+                messages.success(request, f"Processing complete for '{series.name}'.")
+                return redirect('dicom_processor:dashboard_series_view', series_id=series.id)
         
         except Exception as e:
-            messages.error(request, f"An unexpected error occurred during processing: {e}")
-            return redirect('dicom_processor:process_dicom', series_id=series.id)
+            error_msg = str(e)
+            print(f"Processing Error: {error_msg}")
+            traceback.print_exc()
+            
+            if is_ajax:
+                return JsonResponse({'success': False, 'error': error_msg}, status=500)
+            else:
+                messages.error(request, f"Processing failed: {error_msg}")
+                return redirect('dicom_processor:process_dicom', series_id=series.id)
+
 
     latest_result = ProcessingResult.objects.filter(dicom_series=series).first()
     return render(request, 'dicom_processor/process.html', {'series': series, 'latest_result': latest_result})

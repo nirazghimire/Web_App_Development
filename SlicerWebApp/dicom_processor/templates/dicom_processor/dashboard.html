@@ -21,6 +21,26 @@ Dashboard - {{ series.name|default:"Viewer" }}
         </div>
     </div>
 
+    <!-- Toolbar for Annotation/Analysis -->
+    <div class="toolbar-container d-flex gap-2 mb-1 px-2">
+        <div class="btn-group btn-group-sm" role="group">
+            <input type="radio" class="btn-check" name="toolMode" id="toolNone" autocomplete="off" checked value="none">
+            <label class="btn btn-outline-secondary" for="toolNone" title="View/Rotate"><i class="bi bi-cursor"></i>
+                View</label>
+
+            <input type="radio" class="btn-check" name="toolMode" id="toolMeasure" autocomplete="off" value="measure">
+            <label class="btn btn-outline-info" for="toolMeasure" title="Measure Distance"><i class="bi bi-ruler"></i>
+                Measure</label>
+
+            <input type="radio" class="btn-check" name="toolMode" id="toolPencil" autocomplete="off" value="pencil">
+            <label class="btn btn-outline-warning" for="toolPencil" title="Draw/Circle"><i class="bi bi-pencil"></i>
+                Pencil</label>
+        </div>
+        <button id="clearAnnotationsBtn" class="btn btn-sm btn-outline-danger" title="Clear All Annotations"><i
+                class="bi bi-trash"></i> Clear</button>
+        <span id="distanceDisplay" class="ms-3 fw-bold text-info align-self-center"></span>
+    </div>
+
     <!-- Viewer Grid + AI Sidebar Wrapper -->
     <div class="viewer-main-wrapper">
         <!-- Viewer Grid -->
@@ -541,7 +561,7 @@ Dashboard - {{ series.name|default:"Viewer" }}
 }
 </script>
 
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
         <script type="text/javascript" src="{% static 'dicom_processor/js/dist/vtk.bundle.js' %}"></script>
 
         {% endblock %}

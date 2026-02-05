@@ -1,223 +1,21 @@
 import os
 import numpy as np
 import pydicom
+from skimage.transform import resize
+from tensorflow.keras.models import Model, load_model
+from tensorflow.keras.layers import Input, Conv3D, MaxPooling3D, Dense, GlobalAveragePooling3D, Dropout, Activation
+import uuid
 from django.conf import settings
 import matplotlib.pyplot as plt
+import tensorflow as tf
 import vtk
 import json
-import uuid
 
+
+import os
 import SimpleITK as sitk
+from django.conf import settings 
 from vtk.util.numpy_support import vtk_to_numpy, numpy_to_vtk
-
-# TensorFlow imports for AI model
-import tensorflow as tf
-from tensorflow.keras.layers import Conv3D
-from skimage.transform import resize
-
-
-def get_model():
-    """
-    Loads the pre-trained 3D CNN model for ECE prediction.
-    """
-    checkpoint_dir = os.path.join(settings.BASE_DIR, 'dicom_processor', 'checkpoint_v2_1')
-    model_path = os.path.join(checkpoint_dir, 'weights-improvement_v2_1.keras')
-    
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(f"Model file not found at: {model_path}")
-    
-    print(f"--- Loading model from: {model_path} ---")
-    model = tf.keras.models.load_model(model_path)
-    return model
-
-
-def generate_heatmap(dicom_directory):
-    """
-    Generates a Grad-CAM heatmap for ECE detection visualization.
-    
-    Args:
-        dicom_directory: Path to the DICOM series directory.
-        
-    Returns:
-        tuple: (heatmap_vti_path, ece_probability) or (None, None) on failure.
-    """
-    print(f"--- Starting Heatmap Generation for: {dicom_directory} ---")
-    
-    if not os.path.exists(dicom_directory):
-        print(f"Error: Directory not found: {dicom_directory}")
-        return None, None
-
-    # === Step 1: Load DICOM with SimpleITK (preserves geometry) ===
-    try:
-        reader = sitk.ImageSeriesReader()
-        dicom_names = reader.GetGDCMSeriesFileNames(dicom_directory)
-        if not dicom_names:
-            print("Error: No DICOM files found.")
-            return None, None
-        reader.SetFileNames(dicom_names)
-        sitk_original = reader.Execute()
-        print(f"Volume loaded. Size: {sitk_original.GetSize()}")
-    except Exception as e:
-        print(f"Error reading DICOM: {e}")
-        return None, None
-
-    # === Step 2: Preprocess for Model ===
-    volume_np = sitk.GetArrayFromImage(sitk_original)  # (z, y, x)
-    volume_xyz = np.transpose(volume_np, (2, 1, 0))     # (x, y, z)
-    
-    target_shape = (90, 90, 25)
-    volume_resized = resize(volume_xyz, target_shape, preserve_range=True, anti_aliasing=True)
-    
-    # Normalize to 0-1
-    v_min, v_max = volume_resized.min(), volume_resized.max()
-    if v_max > v_min:
-        volume_norm = (volume_resized - v_min) / (v_max - v_min)
-    else:
-        volume_norm = volume_resized
-    
-    input_tensor = np.expand_dims(volume_norm, axis=(0, -1))  # (1, 90, 90, 25, 1)
-
-    # === Step 3: Load Model ===
-    try:
-        model = get_model()
-    except Exception as e:
-        print(f"Model loading failed: {e}")
-        return None, None
-
-    # Find the last Conv3D layer
-    last_conv_layer_name = None
-    for layer in reversed(model.layers):
-        if isinstance(layer, Conv3D):
-            last_conv_layer_name = layer.name
-            break
-    
-    if not last_conv_layer_name:
-        print("Error: No Conv3D layer found in model.")
-        return None, None
-    print(f"Using conv layer: {last_conv_layer_name}")
-
-    # === Step 4: Grad-CAM ===
-    grad_model = tf.keras.models.Model(
-        [model.inputs],
-        [model.get_layer(last_conv_layer_name).output, model.output]
-    )
-
-    with tf.GradientTape() as tape:
-        outputs = grad_model(input_tensor)
-        conv_outputs = outputs[0]
-        predictions = outputs[1]
-        
-        # Handle list output format
-        if isinstance(predictions, list):
-            predictions = predictions[0]
-        
-        # Flatten and get prediction
-        preds_flat = tf.reshape(predictions, (1, -1))
-        pred_index = tf.argmax(preds_flat[0])
-        ece_probability = float(preds_flat[0, 1])  # Class 1 = ECE positive
-        
-        loss = preds_flat[:, pred_index]
-
-    grads = tape.gradient(loss, conv_outputs)
-    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2, 3))
-    
-    conv_outputs = conv_outputs[0]
-    heatmap = tf.reduce_sum(tf.multiply(pooled_grads, conv_outputs), axis=-1)
-    heatmap = tf.maximum(heatmap, 0)  # ReLU
-    
-    max_val = tf.reduce_max(heatmap)
-    if max_val > 0:
-        heatmap = heatmap / max_val
-    
-    heatmap_np = heatmap.numpy()
-    print(f"Raw heatmap shape: {heatmap_np.shape}")
-
-    # === Step 5: Resample to Original Geometry ===
-    # The heatmap is in (x, y, z) order; SITK expects (z, y, x)
-    heatmap_zyx = np.transpose(heatmap_np, (2, 1, 0))
-    sitk_heatmap = sitk.GetImageFromArray(heatmap_zyx.astype(np.float32))
-    
-    # Set the heatmap to cover the same physical space as the original
-    sitk_heatmap.SetOrigin(sitk_original.GetOrigin())
-    sitk_heatmap.SetDirection(sitk_original.GetDirection())
-    
-    orig_size = sitk_original.GetSize()
-    orig_spacing = sitk_original.GetSpacing()
-    heat_size = sitk_heatmap.GetSize()
-    
-    new_spacing = [
-        (orig_size[0] * orig_spacing[0]) / heat_size[0],
-        (orig_size[1] * orig_spacing[1]) / heat_size[1],
-        (orig_size[2] * orig_spacing[2]) / heat_size[2]
-    ]
-    sitk_heatmap.SetSpacing(new_spacing)
-    
-    # Resample to match original grid
-    print("Resampling heatmap to match original resolution...")
-    resampler = sitk.ResampleImageFilter()
-    resampler.SetReferenceImage(sitk_original)
-    resampler.SetInterpolator(sitk.sitkLinear)
-    resampler.SetDefaultPixelValue(0)
-    resampler.SetOutputPixelType(sitk.sitkFloat32)
-    sitk_heatmap_resampled = resampler.Execute(sitk_heatmap)
-
-    # === Step 6: Masking & Thresholding ===
-    heatmap_arr = sitk.GetArrayFromImage(sitk_heatmap_resampled)
-    original_arr = sitk.GetArrayFromImage(sitk_original)
-
-    # 1. Anatomical Masking (Remove Air)
-    # Air is approx -1000 HU. We use -700 as a safe threshold to include skin/soft tissue but exclude outside air.
-    # checking shapes just in case, though they should be identical due to resampling
-    if heatmap_arr.shape == original_arr.shape:
-        print("Applying anatomical mask (threshold > -700 HU)...")
-        mask = original_arr > -700
-        heatmap_arr = heatmap_arr * mask
-    else:
-        print(f"Warning: Shape mismatch (Heatmap: {heatmap_arr.shape} vs Original: {original_arr.shape}). Skipping mask.")
-
-    # 2. Threshold low confidence values (Noise Reduction)
-    # We still keep a small threshold to clean up very low model activations inside the body
-    threshold = np.percentile(heatmap_arr[heatmap_arr > 0], 10) if np.any(heatmap_arr > 0) else 0
-    heatmap_arr[heatmap_arr < threshold] = 0
-    
-    # Rescale to 0-255 for visualization
-    if heatmap_arr.max() > 0:
-        heatmap_arr = (heatmap_arr / heatmap_arr.max() * 255).astype(np.uint8)
-    else:
-        heatmap_arr = heatmap_arr.astype(np.uint8)
-
-    # === Step 7: Save as VTI ===
-    # heatmap_arr is (z,y,x) from SimpleITK. numpy.ravel() iterates x-fastest, which matches VTK's expectation.
-    # DO NOT TRANSPOSE to (x,y,z) or the strides will be wrong!
-    flat_data = np.ascontiguousarray(heatmap_arr).ravel()
-    
-    vtk_data_array = numpy_to_vtk(num_array=flat_data, deep=True, array_type=vtk.VTK_UNSIGNED_CHAR)
-    
-    vtk_img = vtk.vtkImageData()
-    dims = sitk_heatmap_resampled.GetSize()
-    vtk_img.SetDimensions(dims[0], dims[1], dims[2])
-    vtk_img.SetSpacing(sitk_heatmap_resampled.GetSpacing())
-    vtk_img.SetOrigin(sitk_heatmap_resampled.GetOrigin())
-    vtk_img.SetDirectionMatrix(sitk_heatmap_resampled.GetDirection())
-    vtk_img.GetPointData().SetScalars(vtk_data_array)
-    
-    # Save to file
-    save_dir = os.path.join(settings.MEDIA_ROOT, 'heatmaps_vti', str(uuid.uuid4()))
-    os.makedirs(save_dir, exist_ok=True)
-    heatmap_vti_path = os.path.join(save_dir, 'heatmap.vti')
-    
-    writer = vtk.vtkXMLImageDataWriter()
-    writer.SetFileName(heatmap_vti_path)
-    writer.SetInputData(vtk_img)
-    writer.Write()
-    
-    print(f"Heatmap saved to: {heatmap_vti_path}")
-    print(f"ECE Probability: {ece_probability:.4f}")
-    
-    return heatmap_vti_path, ece_probability
-
-
-
 
 def convert_dicom_series_to_nrrd(dicom_directory_path, output_nrrd_path):
     """
@@ -444,6 +242,269 @@ def generate_all_directional_slices(dicom_folder, output_folder, user_id, series
             plt.imsave(full_path, img, cmap='gray')
 
 
+def get_model(input_shape=(90, 90, 25, 1), num_classes=2):
+    """
+    Defines the 3D CNN model architecture, loads weights from a checkpoint, 
+    and returns the compiled model.
+    """
+    checkpoint_dir = os.path.join(settings.BASE_DIR, 'dicom_processor', 'checkpoint_v2_1')
+    
+    # Priority 1: Load .keras full model if available
+    if os.path.exists(checkpoint_dir):
+        keras_files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.keras')]
+        if keras_files:
+            keras_files.sort()
+            model_path = os.path.join(checkpoint_dir, keras_files[-1])
+            print(f"--- Loading full model from: {model_path} ---")
+            try:
+                return load_model(model_path)
+            except Exception as e:
+                print(f"Warning: Failed to load .keras model: {e}")
+
+    # --- Define Model Architecture (Fallback) ---
+    i = Input(shape=input_shape)
+    
+    # Block 1
+    x = Conv3D(32, (3, 3, 3), activation='relu', padding='same', name='conv3d_1')(i)
+    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_1')(x)
+    
+    # Block 2
+    x = Conv3D(64, (3, 3, 3), activation='relu', padding='same', name='conv3d_2')(x)
+    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_2')(x)
+    
+    # Block 3
+    x = Conv3D(128, (3, 3, 3), activation='relu', padding='same', name='conv3d_3')(x)
+    x = MaxPooling3D(pool_size=(2, 2, 2), name='maxpool3d_3')(x)
+
+    # Global Average Pooling and Dense Layers
+    x = GlobalAveragePooling3D(name='global_avg_pool')(x)
+    x = Dense(256, activation='relu', name='dense_1')(x)
+    x = Dropout(0.3, name='dropout_1')(x)
+    x = Dense(num_classes, name='dense_output')(x)
+    x = Activation('softmax', name='activation_softmax')(x)
+    
+    model = Model(inputs=i, outputs=x)
+    
+    # --- Load Weights from Checkpoint ---
+    checkpoint_dir = os.path.join(settings.BASE_DIR, 'dicom_processor', 'checkpoint_v2_1')
+    latest_checkpoint = tf.train.latest_checkpoint(checkpoint_dir)
+    
+    if latest_checkpoint:
+        print(f"--- Loading weights from checkpoint: {latest_checkpoint} ---")
+        model.load_weights(latest_checkpoint)
+    else:
+        # Fallback: Look for .keras or .h5 files
+        files = [f for f in os.listdir(checkpoint_dir) if f.endswith('.keras') or f.endswith('.h5')]
+        if files:
+            # Sort to pick the "latest" if named sequentially, or just pick one
+            files.sort()
+            w_path = os.path.join(checkpoint_dir, files[-1])
+            print(f"--- Loading weights from Keras file: {w_path} ---")
+            model.load_weights(w_path)
+        else:
+            raise FileNotFoundError(f"No model checkpoint found in {checkpoint_dir}. Aborting heatmap generation.")
+
+    return model
+
+def generate_heatmap(dicom_directory):
+    """
+    Generates a Grad-CAM style heatmap using SimpleITK for robust geometry handling.
+    Saves as .vti and returns the path and prediction score.
+    """
+    print(f"--- Starting generate_heatmap (SITK-based) for: {dicom_directory} ---")
+    
+    if not os.path.exists(dicom_directory):
+        print(f"Directory not found: {dicom_directory}")
+        return None, None
+
+    # --- Step 1: Read DICOM Series with SimpleITK ---
+    try:
+        reader = sitk.ImageSeriesReader()
+        dicom_names = reader.GetGDCMSeriesFileNames(dicom_directory)
+        reader.SetFileNames(dicom_names)
+        sitk_image = reader.Execute()
+        
+        # sitk_image is (Width, Height, Depth).
+        # GetArrayFromImage returns (Depth, Height, Width) -> (z, y, x)
+        volume_np = sitk.GetArrayFromImage(sitk_image)
+        print(f"Loaded Volume. SITK Size: {sitk_image.GetSize()}, Numpy Shape: {volume_np.shape}")
+        
+    except Exception as e:
+        print(f"Error reading DICOM with SimpleITK: {e}")
+        return None, None
+
+    if volume_np is None or volume_np.size == 0:
+        return None, None
+
+    # --- Step 2: Prepare for Model (Standardize Orientation) ---
+    # The model expects (90, 90, 25).
+    # We need to process the numpy array.
+    # Model trained on transposed data? 
+    # Original code: volume_transposed = np.transpose(volume, (2, 1, 0)) # (x, y, z)
+    # Then resized to (90, 90, 25).
+    #
+    # SITK Numpy array is (z, y, x).
+    # To get (x, y, z), we transpose (2, 1, 0).
+    volume_transposed = np.transpose(volume_np, (2, 1, 0)) # (x, y, z)
+    
+    # Resize for model input
+    correct_shape = (90, 90, 25)
+    # Note: We resize the raw data just for inference.
+    resized_volume = resize(volume_transposed, correct_shape, anti_aliasing=True)
+    input_vol_for_model = np.expand_dims(resized_volume, axis=(0, -1))
+
+    # --- Step 3: Model Inference ---
+    model = get_model()
+    if model is None:
+        return None, None
+
+    last_conv_layer_name = None
+    for layer in reversed(model.layers):
+        if isinstance(layer, Conv3D):
+            last_conv_layer_name = layer.name
+            break
+            
+    if last_conv_layer_name is None:
+        print("Error: No Conv3D layer found.")
+        return None, None
+
+    grad_model = tf.keras.models.Model(
+        [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
+    )
+
+    with tf.GradientTape() as tape:
+        conv_output, preds = grad_model(input_vol_for_model)
+        # Fix for potential extra dimensions (e.g. (1, 1, 2) -> (1, 2))
+        preds = tf.squeeze(preds)
+        if len(preds.shape) == 1:
+             preds = tf.expand_dims(preds, 0)
+        
+        pred_index = tf.argmax(preds[0])
+        prediction_score_value = float(preds[0][pred_index].numpy())
+        class_channel = preds[:, pred_index]
+
+    grads = tape.gradient(class_channel, conv_output)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2, 3))
+    
+    conv_output = conv_output[0]
+    heatmap_np = np.zeros(conv_output.shape[0:3], dtype=np.float32)
+
+    for i, w in enumerate(pooled_grads):
+        heatmap_np += w * conv_output[:, :, :, i]
+
+    heatmap_np = np.maximum(heatmap_np, 0)
+    if np.max(heatmap_np) > 0:
+        heatmap_np = heatmap_np / np.max(heatmap_np)
+    
+    # --- Step 4: Create SITK Image for Heatmap and Resample ---
+    # heatmap_np is small (e.g. 11x11x3 or similar, depending on pooling).
+    # It corresponds to the 'correct_shape' (90, 90, 25) which is (x, y, z).
+    # Let's resize it back to (90, 90, 25) first?
+    # Or creating an SITK image with physical spacing?
+    
+    # Let's treat heatmap_np as a volume covering the full physical extent.
+    # We will construct a SITK image from it.
+    # Current shape: (x_small, y_small, z_small).
+    # SITK expects (z, y, x) for GetImageFromArray.
+    heatmap_np_z_first = np.transpose(heatmap_np, (2, 1, 0)) 
+    sitk_heatmap_small = sitk.GetImageFromArray(heatmap_np_z_first)
+    
+    # Set the small heatmap's physical bounds to match the original image.
+    # This effectively stretches it to cover the patient.
+    sitk_heatmap_small.SetOrigin(sitk_image.GetOrigin())
+    
+    # Calculate spacing so it covers the same field of view
+    orig_size = sitk_image.GetSize() # (x, y, z)
+    orig_spacing = sitk_image.GetSpacing()
+    small_size = sitk_heatmap_small.GetSize()
+    
+    new_spacing = [
+        (orig_size[0] * orig_spacing[0]) / small_size[0],
+        (orig_size[1] * orig_spacing[1]) / small_size[1],
+        (orig_size[2] * orig_spacing[2]) / small_size[2],
+    ]
+    sitk_heatmap_small.SetSpacing(new_spacing)
+    sitk_heatmap_small.SetDirection(sitk_image.GetDirection())
+    
+    # Now Resample it to match the original grid exactly.
+    # This gives us a 1:1 overlay with perfect alignment.
+    print("Resampling heatmap to match original resolution...")
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(sitk_image)
+    resampler.SetInterpolator(sitk.sitkLinear)
+    resampler.SetDefaultPixelValue(0)
+    
+    sitk_heatmap_resampled = resampler.Execute(sitk_heatmap_small)
+
+    # --- Step 4b: Apply Threshold Mask (Background Removal) ---
+    # Convert to standard numpy to apply mask
+    print("Applying Background Mask (Thresholding Air <-700 HU)...")
+    heatmap_arr = sitk.GetArrayFromImage(sitk_heatmap_resampled)
+    original_arr = sitk.GetArrayFromImage(sitk_image)
+
+    # Safety check for shape mismatch (should be identical due to resampling)
+    if heatmap_arr.shape == original_arr.shape:
+        # Mask out air
+        heatmap_arr[original_arr < -700] = 0
+        
+        # Copy back to SITK image
+        sitk_heatmap_masked = sitk.GetImageFromArray(heatmap_arr)
+        sitk_heatmap_masked.CopyInformation(sitk_heatmap_resampled)
+        sitk_heatmap_resampled = sitk_heatmap_masked
+    else:
+        print(f"Warning: Shape mismatch during masking. Heatmap: {heatmap_arr.shape}, Original: {original_arr.shape}. Skipping mask.")
+    
+    # --- Step 5: Convert to VTK ---
+    # Convert to standard 0-255 uint8 range for visualization
+    rescale_filter = sitk.RescaleIntensityImageFilter()
+    rescale_filter.SetOutputMinimum(0)
+    rescale_filter.SetOutputMaximum(255)
+    sitk_heatmap_uint8 = rescale_filter.Execute(sitk_heatmap_resampled)
+    
+    # heatmap_final_np is (z, y, x) from SITK (Top-Left Origin).
+    # VTK ImageData expects Bottom-Left Origin (y=0 is bottom).
+    # We must FLIP the Y-axis to align the memory layout.
+    heatmap_final_np = sitk.GetArrayFromImage(sitk_heatmap_uint8)
+    heatmap_final_np = np.flip(heatmap_final_np, axis=1)
+
+    # VTK ImageData expects the data array to be flat with x coordinate changing fastest.
+    # Since numpy defaults to C-order (last index changes fastest), flattening (z,y,x) 
+    # automatically gives us x-fastest ordering. No transpose is needed.
+    flat_data = heatmap_final_np.ravel()
+    
+    vtk_data_array = numpy_to_vtk(num_array=flat_data, deep=True, array_type=vtk.VTK_UNSIGNED_CHAR)
+    
+    vtk_img = vtk.vtkImageData()
+    dims = sitk_heatmap_uint8.GetSize() # (x, y, z)
+    # SetDimensions takes number of points, not number of cells
+    # For an image with nx × ny × nz voxels, we have (nx+1) × (ny+1) × (nz+1) points
+    # But for images without explicit boundaries, we use (nx, ny, nz)
+    vtk_img.SetDimensions(dims[0], dims[1], dims[2])
+    vtk_img.SetSpacing(sitk_heatmap_uint8.GetSpacing())
+    vtk_img.SetOrigin(sitk_heatmap_uint8.GetOrigin())
+    
+    # Crucial: Set Direction!
+    # VTK Python's SetDirectionMatrix takes a 3x3 matrix or flat 9 list
+    direction = sitk_heatmap_uint8.GetDirection() # flattening 9 elements tuple
+    vtk_img.SetDirectionMatrix(direction)
+    
+    vtk_img.GetPointData().SetScalars(vtk_data_array)
+    
+    # --- Step 6: Save VTI ---
+    save_dir_name = str(uuid.uuid4())
+    output_directory = os.path.join(settings.MEDIA_ROOT, 'heatmaps_vti', save_dir_name)
+    os.makedirs(output_directory, exist_ok=True)
+    heatmap_vti_path = os.path.join(output_directory, 'heatmap.vti')
+    
+    writer = vtk.vtkXMLImageDataWriter()
+    writer.SetFileName(heatmap_vti_path)
+    writer.SetInputData(vtk_img)
+    writer.Write()
+    
+    print(f"Heatmap (VTI) saved with SITK geometry to: {heatmap_vti_path}")
+    return heatmap_vti_path, prediction_score_value
+
+    
 
 
 def load_scan_as_3d_volume(dicom_series_directory_path):
