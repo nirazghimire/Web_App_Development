@@ -465,7 +465,11 @@ def generate_heatmap(dicom_directory):
     # VTK ImageData expects Bottom-Left Origin (y=0 is bottom).
     # We must FLIP the Y-axis to align the memory layout.
     heatmap_final_np = sitk.GetArrayFromImage(sitk_heatmap_uint8)
-    heatmap_final_np = np.flip(heatmap_final_np, axis=1)
+    # Flip ALL axes to match Frontend/VTK orientation
+    # axis=0 (Z): Fixes inverted axial slider movement
+    # axis=1 (Y): Fixes "upside down" visual
+    # axis=2 (X): Fixes inverted sagittal/coronal lateral movement
+    heatmap_final_np = np.flip(heatmap_final_np, axis=(0, 1, 2))
 
     # VTK ImageData expects the data array to be flat with x coordinate changing fastest.
     # Since numpy defaults to C-order (last index changes fastest), flattening (z,y,x) 
