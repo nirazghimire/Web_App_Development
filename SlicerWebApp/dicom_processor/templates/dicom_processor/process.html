@@ -39,8 +39,9 @@
                                             Prediction</label>
                                     </div>
                                     {% if latest_result and latest_result.ece_probability is not None %}
-                                    <span class="badge bg-success p-2">Predicted Score: {{
-                                        latest_result.ece_probability|floatformat:2 }}</span>
+                                    <span class="badge bg-success p-2">Predicted Score: {{ latest_result.ece_probability|floatformat:2 }}</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary p-2">Status: Not Predicted</span>
                                     {% endif %}
                                 </div>
                                 <button type="submit" class="btn btn-primary" id="processBtn">
