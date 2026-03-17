@@ -16,6 +16,7 @@ class DicomSeries(models.Model):
     window_center = models.FloatField(default=40)
     window_width = models.FloatField(default=400)
     modality = models.CharField(max_length=10, blank=True)
+    series_instance_uid = models.CharField(max_length=255, blank=True, null=True, db_index=True)
 
     def __str__(self):
         return self.name

@@ -61,10 +61,39 @@ def upload_dicom(request):
     if request.method == 'POST':
         form = DicomUploadForm(request.POST, request.FILES)
         files = request.FILES.getlist('dicom_files')
-        if form.is_valid():
+        if form.is_valid() and files:
+            # --- Check for Duplicates ---
+            # Iterate through the first few files to find a valid DICOM with SeriesInstanceUID
+            series_uid = ""
+            files_to_check = files[:10] # Check first 10 files to avoid performance hit on large uploads
+            
+            for file_to_check in files_to_check:
+                try:
+                    # Read the file in memory
+                    ds_check = pydicom.dcmread(file_to_check, stop_before_pixels=True, force=True)
+                    uid_candidate = getattr(ds_check, "SeriesInstanceUID", "").strip()
+                    
+                    if uid_candidate:
+                        series_uid = uid_candidate
+                        break # Stop once we find a valid UID
+                except Exception as e:
+                     # Not a valid DICOM or read error, continue to next file
+                     pass
+                finally:
+                    # Reset file pointer for the verified file so it can be saved properly
+                    file_to_check.seek(0)
+
+            # If we found a UID, check if this user already uploaded it
+            if series_uid:
+                    existing_series = DicomSeries.objects.filter(user=request.user, series_instance_uid=series_uid).first()
+                    if existing_series:
+                        messages.error(request, f"This series is already uploaded as a name '{existing_series.name}'")
+                        return redirect('dicom_processor:upload_dicom')
+
             series = DicomSeries.objects.create(
                 name="Processing...", user=request.user, 
-                patient_id="", patient_age="", patient_gender="", modality=""
+                patient_id="", patient_age="", patient_gender="", modality="",
+                series_instance_uid=series_uid if 'series_uid' in locals() else None
             )
             series_path = os.path.join(settings.MEDIA_ROOT, 'dicom_series', f'series_{series.id}')
             os.makedirs(series_path, exist_ok=True)

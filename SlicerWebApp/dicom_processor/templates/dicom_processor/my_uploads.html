@@ -6,38 +6,55 @@
 <h2 class="mb-4">My Uploaded DICOM Series</h2>
 
 {% if series_list %}
-    <ul class="list-group">
-        {% for series in series_list %}
-            <li class="list-group-item d-flex justify-content-between align-items-center">
-                <div>
-                    <strong>{{ series.name }}</strong><br>
-                    <small>Uploaded at: {{ series.uploaded_date }}</small>
-                </div>
+<ul class="list-group">
+    {% for series in series_list %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+        <div>
+            <strong>{{ series.name }}</strong><br>
+            <small>Uploaded at: <span class="utc-date" data-iso="{{ series.uploaded_date|date:'c' }}">{{
+                    series.uploaded_date }}</span></small>
+        </div>
 
-                <div class="d-flex gap-2">
-                    <!-- Process button -->
-                    <a href="{% url 'dicom_processor:process_dicom' series.id %}" class="btn btn-sm btn-outline-warning">
-                        Process
-                    </a>
+        <div class="d-flex gap-2">
+            <!-- Process button -->
+            <a href="{% url 'dicom_processor:process_dicom' series.id %}" class="btn btn-sm btn-outline-warning">
+                Process
+            </a>
 
-                    <!-- View button -->
-                    <a href="{% url 'dicom_processor:dashboard_series_view' series.id %}" class="btn btn-sm btn-outline-success">
-                        View Dashboard
-                    </a>
+            <!-- View button -->
+            <a href="{% url 'dicom_processor:dashboard_series_view' series.id %}"
+                class="btn btn-sm btn-outline-success">
+                View Dashboard
+            </a>
 
-                    <!-- Delete button with confirmation -->
-                    <form method="post" action="{% url 'dicom_processor:delete_dicom' series.id %}" style="display:inline;"
-                          onsubmit="return confirm('Are you sure you want to delete &quot;{{ series.name }}&quot; DICOM series?');">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-danger">
-                            Delete
-                        </button>
-                    </form>
-                </div>
-            </li>
-        {% endfor %}
-    </ul>
+            <!-- Delete button with confirmation -->
+            <form method="post" action="{% url 'dicom_processor:delete_dicom' series.id %}" style="display:inline;"
+                onsubmit="return confirm('Are you sure you want to delete &quot;{{ series.name }}&quot; DICOM series?');">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-sm btn-outline-danger">
+                    Delete
+                </button>
+            </form>
+        </div>
+    </li>
+    {% endfor %}
+</ul>
 {% else %}
-    <p>You haven’t uploaded anything yet.</p>
+<p>You haven’t uploaded anything yet.</p>
 {% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const dateSpans = document.querySelectorAll('.utc-date');
+        dateSpans.forEach(span => {
+            const iso = span.getAttribute('data-iso');
+            if (iso) {
+                const date = new Date(iso);
+                span.textContent = date.toLocaleString();
+            }
+        });
+    });
+</script>
 {% endblock %}
