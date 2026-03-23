@@ -23,7 +23,6 @@ import vtkLookupTable from '@kitware/vtk.js/Common/Core/LookupTable';
 import vtkPicker from '@kitware/vtk.js/Rendering/Core/Picker';
 
 import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
-import vtkLineWidget from '@kitware/vtk.js/Widgets/Widgets3D/LineWidget';
 import vtkSplineWidget from '@kitware/vtk.js/Widgets/Widgets3D/SplineWidget';
 import vtkPlanePointManipulator from '@kitware/vtk.js/Widgets/Manipulators/PlaneManipulator';
 import Chart from 'chart.js/auto';
@@ -414,8 +413,8 @@ document.addEventListener('DOMContentLoaded', function () {
                     const pos = [0, 0, 0];
                     // Camera positions: axis0 looks from -X, axis1 from -Y, axis2 from +Z
                     switch (viewConfig.axis) {
-                        case 0: pos[0] = -offsetAmount; break; // Sagittal: offset towards -X (camera)
-                        case 1: pos[1] = -offsetAmount; break; // Coronal: offset towards -Y (camera)
+                        case 0: pos[0] = offsetAmount; break; // Sagittal: offset towards -X (camera)
+                        case 1: pos[1] = offsetAmount; break; // Coronal: offset towards -Y (camera)
                         case 2: pos[2] = offsetAmount; break;  // Axial: offset towards +Z (camera)
                     }
                     hActor.setPosition(pos);
@@ -441,9 +440,9 @@ document.addEventListener('DOMContentLoaded', function () {
                 camera.setParallelProjection(true);
                 renderer.resetCamera();
                 switch (viewConfig.axis) {
-                    case 0: camera.setPosition(bounds[0] - 1, center[1], center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break;
-                    case 1: camera.setPosition(center[0], bounds[2] - 1, center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break;
-                    case 2: camera.setPosition(center[0], center[1], bounds[5] + 1); camera.setViewUp(0, -1, 0); camera.setParallelScale((bounds[3] - bounds[2]) / 2); break;
+                    case 0: camera.setPosition(bounds[1] + 1, center[1], center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break;
+                    case 1: camera.setPosition(center[0], bounds[3] + 1, center[2]); camera.setViewUp(0, 0, -1); camera.setParallelScale((bounds[5] - bounds[4]) / 2); break;
+                    case 2: camera.setPosition(center[0], center[1], bounds[5] + 1); camera.setViewUp(0, 1, 0); camera.setParallelScale((bounds[3] - bounds[2]) / 2); break;
                 }
                 renderer.resetCameraClippingRange();
 
@@ -624,7 +623,6 @@ document.addEventListener('DOMContentLoaded', function () {
             // --- WIDGET MANAGER SETUP ---
             const widgetManagers = [];
             const toolWidgets = {
-                measure: [],
                 pencil: []
             };
             const viewManipulators = {}; // Store manipulators to update their origin
@@ -690,84 +688,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 widgetManagers.push(manager);
 
-                // --- LINE WIDGET (Ruler) ---
-                const dWidget = vtkLineWidget.newInstance();
-
-                // Create Manipulator
-                // For 2D views, constrain to the slice plane.
-                // For 3D view, we can use a plane manipulator that faces the camera
-                // or just leave it free (default 3D interaction).
-                if (is2D) {
-                    const manip = vtkPlanePointManipulator.newInstance();
-                    switch (axis) {
-                        case 0: manip.setUserNormal(1, 0, 0); break; // Sagittal
-                        case 1: manip.setUserNormal(0, 1, 0); break; // Coronal
-                        case 2: manip.setUserNormal(0, 0, 1); break; // Axial
-                    }
-                    dWidget.setManipulator(manip);
-                    viewManipulators[axis] = manip;
-                } else {
-                    // 3D View: Optional specific manipulator, but default works well for 3D lines
-                }
-
-                const dHandle = manager.addWidget(dWidget);
-                // Professional Look & Feel - Diagnostic & Defensive
-                const reps = dHandle.getRepresentations();
-                if (reps && reps.length > 1) {
-                    const rep0 = reps[0];
-                    const rep1 = reps[1];
-
-                    if (rep0) {
-                        rep0.setScaleInPixels(true);
-                        const actors0 = rep0.getActors();
-                        if (actors0 && actors0.length > 0) {
-                            actors0[0].getProperty().setColor(0, 1, 1); // Cyan
-                        }
-                    }
-
-                    if (rep1) {
-                        rep1.setScaleInPixels(true);
-                        const actors1 = rep1.getActors();
-                        if (actors1 && actors1.length > 0) {
-                            actors1[0].getProperty().setColor(0, 1, 1); // Cyan
-                        }
-                    }
-                } else {
-                    console.warn('LineWidget representations not ready or structure changed:', reps);
-                }
-
-                // Make handles slightly smaller and cleaner
-                // Note: vtk.js handle representation API can be verbose, relying on defaults mostly for now
-
-                // Distance Calculation Logic
-                const widgetState = dWidget.getWidgetState();
-                widgetState.onModified(() => {
-                    const h1 = widgetState.getHandle1();
-                    const h2 = widgetState.getHandle2();
-
-                    if (h1 && h2 && h1.getOrigin() && h2.getOrigin()) {
-                        const p1 = h1.getOrigin();
-                        const p2 = h2.getOrigin();
-
-                        const dx = p1[0] - p2[0];
-                        const dy = p1[1] - p2[1];
-                        const dz = p1[2] - p2[2];
-                        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-                        // Update UI
-                        const display = document.getElementById('distanceDisplay');
-                        if (display) {
-                            display.textContent = `Distance: ${distance.toFixed(2)} mm`;
-                            display.style.color = '#00ffff'; // Match cyan color
-                            display.style.fontWeight = 'bold';
-                        }
-
-                        // Optional: Ensure text text is cleared if invalid
-                    }
-                });
-
-                toolWidgets.measure.push({ widget: dWidget, handle: dHandle, manager });
-
                 // --- SPLINE WIDGET (Pencil/Contour) ---
                 const sWidget = vtkSplineWidget.newInstance();
                 if (is2D) {
@@ -804,19 +724,6 @@ document.addEventListener('DOMContentLoaded', function () {
 
             const axisManipulators = { 0: [], 1: [], 2: [] };
             // Re-populate axisManipulators properly
-            toolWidgets.measure.forEach(item => {
-                const manip = item.widget.getManipulator();
-                // Find which axis this belongs to. 
-                // We can infer from the normal.
-                if (manip && manip.getUserNormal) {
-                    const n = manip.getUserNormal();
-                    if (n) {
-                        if (n[0] === 1) axisManipulators[0].push(manip);
-                        if (n[1] === 1) axisManipulators[1].push(manip);
-                        if (n[2] === 1) axisManipulators[2].push(manip);
-                    }
-                }
-            });
             toolWidgets.pencil.forEach(item => {
                 const manip = item.widget.getManipulator();
                 if (manip && manip.getUserNormal) {
@@ -866,9 +773,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 console.log(`Switching tool mode to: ${mode}`);
 
                 // Disable all first
-                toolWidgets.measure.forEach(item => {
-                    item.handle.setEnabled(false);
-                });
                 toolWidgets.pencil.forEach(item => {
                     item.handle.setEnabled(false);
                 });
@@ -879,13 +783,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
 
                 // Re-enable interactions for the selected mode
-                if (mode === 'measure') {
-                    toolWidgets.measure.forEach(item => {
-                        item.manager.enablePicking();
-                        item.handle.setEnabled(true);
-                        // item.handle.grabFocus(); // Only grab focus if we want exclusive interaction
-                    });
-                } else if (mode === 'pencil') {
+                if (mode === 'pencil') {
                     toolWidgets.pencil.forEach(item => {
                         item.manager.enablePicking();
                         item.handle.setEnabled(true);
@@ -905,32 +803,20 @@ document.addEventListener('DOMContentLoaded', function () {
                     if (confirm("Clear all annotations?")) {
 
                         // MVP: Reloading is safest to avoid lingering state bugs.
-                        // 1. Clear Measure Widgets
-                        toolWidgets.measure.forEach(item => {
-                            if (item.manager) {
-                                item.manager.removeWidget(item.handle);
-                            }
-                        });
-
-                        // 2. Clear Pencil Widgets
+                        // 1. Clear Pencil Widgets
                         toolWidgets.pencil.forEach(item => {
                             if (item.manager) {
                                 item.manager.removeWidget(item.handle);
                             }
                         });
 
-                        // 3. Reset Arrays
-                        toolWidgets.measure = [];
+                        // 2. Reset Arrays
                         toolWidgets.pencil = [];
 
-                        // 4. Update UI
-                        const display = document.getElementById('distanceDisplay');
-                        if (display) display.textContent = '';
-
-                        // 5. Re-render
+                        // 3. Re-render
                         allRenderWindows.forEach(rw => rw.getRenderWindow().render());
 
-                        // 6. Reset tool mode
+                        // 4. Reset tool mode
                         updateToolMode();
                     }
                 });

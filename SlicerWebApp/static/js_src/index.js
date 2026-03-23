@@ -55,7 +55,7 @@ function createSliceView(container, imageData, axis) {
       camera.setPosition(0, -1, 0);
       break;
     case 2: // Axial
-      camera.setViewUp(0, -1, 0);
+      camera.setViewUp(0, 1, 0);
       camera.setPosition(0, 0, 1);
       break;
     default:

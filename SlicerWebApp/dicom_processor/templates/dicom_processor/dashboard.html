@@ -28,31 +28,18 @@ Dashboard - {{ series.name|default:"Viewer" }}
             <label class="btn btn-outline-secondary" for="toolNone" title="View/Rotate"><i class="bi bi-cursor"></i>
                 View</label>
 
-            <input type="radio" class="btn-check" name="toolMode" id="toolMeasure" autocomplete="off" value="measure">
-            <label class="btn btn-outline-info" for="toolMeasure" title="Measure Distance"><i class="bi bi-ruler"></i>
-                Measure</label>
-
             <input type="radio" class="btn-check" name="toolMode" id="toolPencil" autocomplete="off" value="pencil">
             <label class="btn btn-outline-warning" for="toolPencil" title="Draw/Circle"><i class="bi bi-pencil"></i>
                 Pencil</label>
         </div>
         <button id="clearAnnotationsBtn" class="btn btn-sm btn-outline-danger" title="Clear All Annotations"><i
                 class="bi bi-trash"></i> Clear</button>
-        <span id="distanceDisplay" class="ms-3 fw-bold text-info align-self-center"></span>
     </div>
 
     <!-- Viewer Grid + AI Sidebar Wrapper -->
     <div class="viewer-main-wrapper">
         <!-- Viewer Grid -->
         <div class="viewer-grid">
-            <!-- 3D View -->
-            <div class="viewer-container">
-                <div class="viewer-header d-flex justify-content-between align-items-center">
-                    <span>3D View</span>
-                </div>
-                <div class="viewer-box" id="view3D"></div>
-            </div>
-
             <!-- Axial View -->
             <div class="viewer-container">
                 <div class="viewer-header">Axial</div>
@@ -68,19 +55,12 @@ Dashboard - {{ series.name|default:"Viewer" }}
                 </div>
             </div>
 
-            <!-- Sagittal View -->
+            <!-- 3D View -->
             <div class="viewer-container">
-                <div class="viewer-header">Sagittal</div>
-                <div class="viewer-box" id="viewSagittal">
-                    <span class="orientation-marker top">S</span>
-                    <span class="orientation-marker bottom">I</span>
-                    <span class="orientation-marker left">A</span>
-                    <span class="orientation-marker right">P</span>
+                <div class="viewer-header d-flex justify-content-between align-items-center">
+                    <span>3D View</span>
                 </div>
-                <div class="viewer-footer">
-                    <input type="range" class="form-range" id="sagittalSlider" min="0" value="0">
-                    <span id="sagittalSliceLabel" class="small">0</span>
-                </div>
+                <div class="viewer-box" id="view3D"></div>
             </div>
 
             <!-- Coronal View -->
@@ -95,6 +75,21 @@ Dashboard - {{ series.name|default:"Viewer" }}
                 <div class="viewer-footer">
                     <input type="range" class="form-range" id="coronalSlider" min="0" value="0">
                     <span id="coronalSliceLabel" class="small">0</span>
+                </div>
+            </div>
+
+            <!-- Sagittal View -->
+            <div class="viewer-container">
+                <div class="viewer-header">Sagittal</div>
+                <div class="viewer-box" id="viewSagittal">
+                    <span class="orientation-marker top">S</span>
+                    <span class="orientation-marker bottom">I</span>
+                    <span class="orientation-marker left">A</span>
+                    <span class="orientation-marker right">P</span>
+                </div>
+                <div class="viewer-footer">
+                    <input type="range" class="form-range" id="sagittalSlider" min="0" value="0">
+                    <span id="sagittalSliceLabel" class="small">0</span>
                 </div>
             </div>
 
