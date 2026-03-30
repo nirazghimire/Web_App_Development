@@ -31,5 +31,13 @@ COPY entrypoint.sh /app/
 RUN sed -i 's/\r$//g' /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
+# Create non-root user and set permissions
+RUN adduser --disabled-password --no-create-home appuser \
+    && mkdir -p /app/staticfiles /app/media \
+    && chown -R appuser:appuser /app
+
+# Switch to non-root user
+USER appuser
+
 # Run entrypoint.sh
 ENTRYPOINT ["/app/entrypoint.sh"]

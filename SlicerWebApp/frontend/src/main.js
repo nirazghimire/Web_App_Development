@@ -457,6 +457,12 @@ document.addEventListener('DOMContentLoaded', function () {
                     updateAllSlices(i, j, k);
                 });
                 interactor.onLeftButtonPress((event) => {
+                    const checkedInput = document.querySelector('input[name="toolMode"]:checked');
+                    const mode = checkedInput ? checkedInput.value : 'none';
+                    if (mode !== 'none') {
+                        return; // Let other widgets handle the interaction
+                    }
+
                     const pos = event.position;
                     picker.initialize();
                     picker.pick([pos.x, pos.y, 0.0], renderer);
@@ -774,7 +780,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 // Disable all first
                 toolWidgets.pencil.forEach(item => {
-                    item.handle.setEnabled(false);
+                    item.handle.setVisibility(false);
                 });
 
                 // Also disable picking on managers to be safe
@@ -786,7 +792,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (mode === 'pencil') {
                     toolWidgets.pencil.forEach(item => {
                         item.manager.enablePicking();
-                        item.handle.setEnabled(true);
+                        item.handle.setVisibility(true);
                     });
                 }
 

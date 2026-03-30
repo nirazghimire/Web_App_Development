@@ -2,7 +2,7 @@
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from django.contrib import messages
 import os
@@ -265,3 +265,14 @@ def get_heatmap_url(request, series_id):
 # --- ADDING THIS FUNCTION BACK IN ---
 def get_slice_url_ajax(request):
     return JsonResponse({'success': False, 'error': 'This function is not implemented.'})
+
+# --- SECURE MEDIA SERVE ---
+@login_required
+def secure_media_serve(request, path):
+    """
+    Intercepts media requests to check authentication, 
+    then tells Nginx to serve the file internally.
+    """
+    response = HttpResponse()
+    response['X-Accel-Redirect'] = f'/protected_media/{path}'
+    return response
