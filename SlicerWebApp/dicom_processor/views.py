@@ -2,6 +2,8 @@
 
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth import login
+from django.contrib.auth.forms import UserCreationForm
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from django.contrib import messages
@@ -23,6 +25,26 @@ from .utils import (
 # --- Main Views ---
 def home(request):
     return render(request, 'dicom_processor/home.html')
+
+def register(request):
+    if request.user.is_authenticated:
+        return redirect('dicom_processor:home')
+    
+    if request.method == 'POST':
+        form = UserCreationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            login(request, user)
+            messages.success(request, f"Account created successfully! Welcome, {user.username}.")
+            return redirect('dicom_processor:home')
+    else:
+        form = UserCreationForm()
+        
+    # We must ensure form elements have bootstrap classes for nice styling
+    for field in form.fields.values():
+        field.widget.attrs['class'] = 'form-control'
+        
+    return render(request, 'dicom_processor/register.html', {'form': form})
 
 @login_required
 def my_uploads(request):

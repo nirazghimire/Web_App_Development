@@ -16,6 +16,7 @@ urlpatterns = [
     path('dicom/', include('dicom_processor.urls')),
 
     # --- Auth and Main Page URLs ---
+    path('register/', dicom_views.register, name='register'),
     path('login/', auth_views.LoginView.as_view(template_name='dicom_processor/login.html'), name='login'),
     path('logout/', auth_views.LogoutView.as_view(next_page='dicom_processor:home'), name='logout'),
     
