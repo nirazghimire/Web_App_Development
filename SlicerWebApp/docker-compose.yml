@@ -26,16 +26,22 @@ services:
     restart: always
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
-      # Uncomment the next line when you have SSL certificates in the nginx/ssl/ folder
-      # - ./nginx/ssl:/etc/nginx/ssl
+      - ./nginx/ssl/letsencrypt:/etc/letsencrypt
+      - ./nginx/ssl/www:/var/www/certbot
       - static_volume:/app/staticfiles
       - media_volume:/app/media
     ports:
       - 80:80
-      # Uncomment the next line to enable HTTPS port
-      # - 443:443
+      - 443:443
     depends_on:
       - web
+
+  certbot:
+    image: certbot/certbot
+    restart: unless-stopped
+    volumes:
+      - ./nginx/ssl/letsencrypt:/etc/letsencrypt
+      - ./nginx/ssl/www:/var/www/certbot
 
 volumes:
   postgres_data:

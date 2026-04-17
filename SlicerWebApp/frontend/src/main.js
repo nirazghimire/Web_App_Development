@@ -23,7 +23,8 @@ import vtkLookupTable from '@kitware/vtk.js/Common/Core/LookupTable';
 import vtkPicker from '@kitware/vtk.js/Rendering/Core/Picker';
 
 import vtkWidgetManager from '@kitware/vtk.js/Widgets/Core/WidgetManager';
-import vtkSplineWidget from '@kitware/vtk.js/Widgets/Widgets3D/SplineWidget';
+import vtkPaintWidget from '@kitware/vtk.js/Widgets/Widgets3D/PaintWidget';
+import vtkPaintFilter from '@kitware/vtk.js/Filters/General/PaintFilter';
 import vtkPlanePointManipulator from '@kitware/vtk.js/Widgets/Manipulators/PlaneManipulator';
 import Chart from 'chart.js/auto';
 import ChartDataLabels from 'chartjs-plugin-datalabels';
@@ -337,8 +338,20 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (heatmapMappers[1]) heatmapMappers[1].setSlice(j);
                 if (heatmapMappers[2]) heatmapMappers[2].setSlice(k);
 
+                // Update Labelmap Mappers
+                if (sliceMappers[`lm_0`]) sliceMappers[`lm_0`].setSlice(i);
+                if (sliceMappers[`lm_1`]) sliceMappers[`lm_1`].setSlice(j);
+                if (sliceMappers[`lm_2`]) sliceMappers[`lm_2`].setSlice(k);
+
                 // --- UPDATE CROSSHAIRS ---
                 updateCrosshairs(i, j, k);
+
+                // Ensure paintbrush cursor follows the depth
+                toolWidgets.pencil.forEach(item => {
+                    if (item.handle && item.handle.updateRepresentationForRender) {
+                        item.handle.updateRepresentationForRender();
+                    }
+                });
 
                 allRenderWindows.forEach(rw => {
                     rw.getRenderWindow().render();
@@ -347,6 +360,18 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Clear flag after updates are complete
                 isUpdatingSliders = false;
             }
+
+            // --- PAINT FILTER & LABELMAP SETUP ---
+            const painter = vtkPaintFilter.newInstance();
+            painter.setBackgroundImage(imageData);
+            painter.setLabel(1); 
+            painter.setRadius(5); // Minimum size that is visible
+
+            const labelMapCfun = vtkColorTransferFunction.newInstance();
+            labelMapCfun.addRGBPoint(1, 0.0, 1.0, 1.0); // Foreground is Cyan
+            const labelMapOfun = vtkPiecewiseFunction.newInstance();
+            labelMapOfun.addPoint(0, 0); // background transparent
+            labelMapOfun.addPoint(1, 0.4); // painted areas semi-transparent
 
             function resetViews() {
                 const i = Math.floor(dims[0] / 2);
@@ -428,6 +453,29 @@ document.addEventListener('DOMContentLoaded', function () {
                 } else {
                     console.log(`⚠️ No heatmap data for ${viewConfig.id}`);
                 }
+
+                // --- LABEL MAP ACTOR ---
+                const lmMapper = vtkImageMapper.newInstance();
+                lmMapper.setInputConnection(painter.getOutputPort());
+                lmMapper.setSlicingMode(viewConfig.axis);
+                sliceMappers[`lm_${viewConfig.axis}`] = lmMapper;
+
+                const lmActor = vtkImageSlice.newInstance();
+                lmActor.setMapper(lmMapper);
+                lmActor.getProperty().setRGBTransferFunction(labelMapCfun);
+                lmActor.getProperty().setPiecewiseFunction(labelMapOfun);
+                lmActor.getProperty().setOpacity(0.5);
+                lmActor.setPickable(false);
+                
+                const lmPos = [0, 0, 0];
+                const lmOffset = 0.5;
+                switch (viewConfig.axis) {
+                    case 0: lmPos[0] = lmOffset; break;
+                    case 1: lmPos[1] = lmOffset; break;
+                    case 2: lmPos[2] = lmOffset; break;
+                }
+                lmActor.setPosition(lmPos);
+                renderer.addActor(lmActor);
 
                 // Add Crosshair Actor for this view
                 const ch = createCrosshairActor(viewConfig.axis);
@@ -520,6 +568,11 @@ document.addEventListener('DOMContentLoaded', function () {
             const mapper = vtkVolumeMapper.newInstance();
             actor.setMapper(mapper);
             mapper.setInputData(imageData);
+            
+            // Prevent the 3D view from blurring automatically when the frame rate drops
+            // (e.g., when interacting with 2D widgets that force global re-renders)
+            mapper.setAutoAdjustSampleDistances(false);
+            mapper.setSampleDistance(1.5); // Provide a reasonable fixed resolution
 
             const ctfun = vtkColorTransferFunction.newInstance();
             ctfun.addRGBPoint(-1000, 0, 0, 0);
@@ -694,33 +747,51 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 widgetManagers.push(manager);
 
-                // --- SPLINE WIDGET (Pencil/Contour) ---
-                const sWidget = vtkSplineWidget.newInstance();
+                // --- PAINT WIDGET ---
+                const pWidget = vtkPaintWidget.newInstance();
+                pWidget.setRadius(5);
+
                 if (is2D) {
-                    // Reuse the same manipulator if possible, or create a new one tracked same way
-                    // Creating new one to be safe and simple
                     const manip = vtkPlanePointManipulator.newInstance();
                     switch (axis) {
                         case 0: manip.setUserNormal(1, 0, 0); break;
                         case 1: manip.setUserNormal(0, 1, 0); break;
                         case 2: manip.setUserNormal(0, 0, 1); break;
                     }
-                    sWidget.setManipulator(manip);
-
-                    // Add to our update list (we can support multiple per view or just group them)
-                    // Simple hack: We'll update ALL manipulators in the view loop
-                    // But wait, viewManipulators is 1:1 with axis. 
-                    // Let's make viewManipulators an array of manipulators per axis to be robust.
+                    pWidget.setManipulator(manip);
                 }
 
-                const sHandle = manager.addWidget(sWidget);
-                sHandle.setOutputBorder(true);
-                // sHandle.setFreehand(true); // Removed as it caused TypeError
+                const pHandle = manager.addWidget(pWidget);
 
-                // Styling
-                // sHandle.getRepresentations()[0].getActors()[0].getProperty().setColor(0, 1, 0.5); // Spring Green
+                if (is2D) {
+                    pHandle.onStartInteractionEvent(() => {
+                        console.log('Brush Stroke Started on Axis:', axis);
+                        painter.setSlicingMode(axis);
+                        painter.startStroke();
+                        const origin = pWidget.getWidgetState().getTrueOrigin();
+                        if (origin) painter.addPoint(origin);
+                    });
+                    
+                    pHandle.onInteractionEvent(() => {
+                        const origin = pWidget.getWidgetState().getTrueOrigin();
+                        if (origin) painter.addPoint(origin);
+                        
+                        // Force real-time updates while dragging!
+                        allRenderWindows.forEach(rw => {
+                            rw.getRenderWindow().render();
+                        });
+                    });
+                    
+                    pHandle.onEndInteractionEvent(() => {
+                        console.log('Brush Stroke Ended');
+                        painter.endStroke();
+                        allRenderWindows.forEach(rw => {
+                            rw.getRenderWindow().render();
+                        });
+                    });
+                }
 
-                toolWidgets.pencil.push({ widget: sWidget, handle: sHandle, manager });
+                toolWidgets.pencil.push({ widget: pWidget, handle: pHandle, manager });
             });
 
             // Re-implement updateManipulators to handle multiple tools correctly
@@ -781,6 +852,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 // Disable all first
                 toolWidgets.pencil.forEach(item => {
                     item.handle.setVisibility(false);
+                    item.manager.releaseFocus(item.widget);
                 });
 
                 // Also disable picking on managers to be safe
@@ -793,6 +865,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     toolWidgets.pencil.forEach(item => {
                         item.manager.enablePicking();
                         item.handle.setVisibility(true);
+                        item.manager.grabFocus(item.widget);
                     });
                 }
 
@@ -804,26 +877,23 @@ document.addEventListener('DOMContentLoaded', function () {
                 input.addEventListener('change', updateToolMode);
             });
 
+            // Global Escape key listener to exit annotate mode
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    const viewModeInput = document.getElementById('toolNone');
+                    if (viewModeInput && !viewModeInput.checked) {
+                        viewModeInput.checked = true;
+                        updateToolMode();
+                        console.log('Exited annotate mode via Escape key');
+                    }
+                }
+            });
+
             if (clearBtn) {
                 clearBtn.addEventListener('click', () => {
-                    if (confirm("Clear all annotations?")) {
-
-                        // MVP: Reloading is safest to avoid lingering state bugs.
-                        // 1. Clear Pencil Widgets
-                        toolWidgets.pencil.forEach(item => {
-                            if (item.manager) {
-                                item.manager.removeWidget(item.handle);
-                            }
-                        });
-
-                        // 2. Reset Arrays
-                        toolWidgets.pencil = [];
-
-                        // 3. Re-render
-                        allRenderWindows.forEach(rw => rw.getRenderWindow().render());
-
-                        // 4. Reset tool mode
-                        updateToolMode();
+                    if (confirm("Clear all annotations? This will reset the viewer.")) {
+                        // The safest, most bug-free way to completely wipe vtk context memory and tool states
+                        window.location.reload();
                     }
                 });
             }
