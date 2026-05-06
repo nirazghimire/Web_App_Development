@@ -15,6 +15,7 @@ urlpatterns = [
     # Dashboard routes
     path('dashboard/', views.dashboard_view, name='dashboard_latest_view'),
     path('dashboard/<int:series_id>/', views.dashboard_view, name='dashboard_series_view'),
+    path('survey/<int:series_id>/', views.survey_view, name='survey_view'),
     
     # Action routes
     path('delete/<int:series_id>/', views.delete_dicom, name='delete_dicom'),

@@ -1,0 +1,206 @@
+{% extends 'dicom_processor/base.html' %}
+
+{% block title %}
+Survey - {{ series.name }}
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid bg-dark text-light p-4" style="height: calc(100vh - 56px); overflow-y: hidden;">
+    <!-- Progress Bar mimicking the design -->
+    <div class="progress mb-4 bg-secondary" style="height: 5px;">
+        <div class="progress-bar bg-success" style="width: 11%"></div>
+    </div>
+    
+    <div class="row h-100 pb-5">
+        <!-- LEFT PANE: Image for Rating -->
+        <div class="col-md-6 border-end border-secondary p-3 h-100 d-flex flex-column">
+            <h5 class="text-center mb-3 text-light">Image for Rating</h5>
+            
+            <div class="d-flex justify-content-center gap-3 flex-grow-1 align-items-center bg-black rounded p-3">
+                 <!-- Image placeholders matching the image structure -->
+                 <div class="text-center">
+                    <div class="bg-secondary d-flex align-items-center justify-content-center border border-secondary" style="width: 300px; height: 450px;">
+                        <span class="text-muted">CT / Original Image<br><small>(Integration Point for Viewer)</small></span>
+                    </div>
+                 </div>
+                 
+                 <div class="text-center">
+                    <div class="bg-secondary d-flex align-items-center justify-content-center border border-secondary" style="width: 300px; height: 450px;">
+                        <span class="text-muted">Synthetic / Heatmap<br><small>(Integration Point for Viewer)</small></span>
+                    </div>
+                 </div>
+            </div>
+            <div class="text-center mt-3 text-muted small">
+                <i class="bi bi-info-circle"></i> Compare the images above to answer the questions on the right.
+            </div>
+        </div>
+
+        <!-- RIGHT PANE: Rating Questions -->
+        <div class="col-md-6 p-4 h-100" style="overflow-y: auto; padding-bottom: 80px !important;">
+            <div class="card bg-secondary text-light border-secondary">
+                <div class="card-header bg-dark border-secondary">
+                    <h5 class="mb-0 text-center">Rating Questions</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST">
+                        {% csrf_token %}
+                        
+                        <!-- Q1 -->
+                        <div class="mb-4 bg-dark p-3 rounded border border-secondary">
+                            <label class="form-label fw-bold">How would you rate the overall image quality of this sequence?</label>
+                            <div class="d-flex justify-content-between text-muted small mb-1">
+                                <span>Very Poor</span><span class="ms-4">Adequate</span><span>Excellent</span>
+                            </div>
+                            <div class="d-flex justify-content-between px-2">
+                                {% for i in "123456789"|make_list %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q1" id="q1_{{i}}" value="{{i}}" required>
+                                    <label class="form-check-label small" for="q1_{{i}}">{{i}}</label>
+                                </div>
+                                {% endfor %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q1" id="q1_10" value="10" required>
+                                    <label class="form-check-label small" for="q1_10">10</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Q2 -->
+                        <div class="mb-4 bg-dark p-3 rounded border border-secondary">
+                            <label class="form-label fw-bold">How would you rate the consistency of the image slices?</label>
+                            <div class="d-flex justify-content-between text-muted small mb-1">
+                                <span>Very Poor</span><span class="ms-4">Adequate</span><span>Excellent</span>
+                            </div>
+                            <div class="d-flex justify-content-between px-2">
+                                {% for i in "123456789"|make_list %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q2" id="q2_{{i}}" value="{{i}}" required>
+                                    <label class="form-check-label small" for="q2_{{i}}">{{i}}</label>
+                                </div>
+                                {% endfor %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q2" id="q2_10" value="10" required>
+                                    <label class="form-check-label small" for="q2_10">10</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Q3 -->
+                        <div class="mb-4 bg-dark p-3 rounded border border-secondary">
+                            <label class="form-label fw-bold">Is the image sequence noisy or overprocessed/overly smooth?</label>
+                            <div class="d-flex justify-content-between text-muted small mb-1">
+                                <span>Very Noisy</span><span class="ms-4">Adequate</span><span>Very Overprocessed</span>
+                            </div>
+                            <div class="d-flex justify-content-between px-2">
+                                {% for i in "123456789"|make_list %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q3" id="q3_{{i}}" value="{{i}}" required>
+                                    <label class="form-check-label small" for="q3_{{i}}">{{i}}</label>
+                                </div>
+                                {% endfor %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q3" id="q3_10" value="10" required>
+                                    <label class="form-check-label small" for="q3_10">10</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Q4 -->
+                        <div class="mb-4 bg-dark p-3 rounded border border-secondary">
+                            <label class="form-label fw-bold">In your assessment is the vertebral canal clear?</label>
+                            <div class="mt-2">
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="q4" id="q4_yes" value="Yes" required>
+                                    <label class="form-check-label" for="q4_yes">Yes</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="q4" id="q4_no" value="No" required>
+                                    <label class="form-check-label" for="q4_no">No</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Q5 -->
+                        <div class="mb-4 bg-dark p-3 rounded border border-secondary">
+                            <label class="form-label fw-bold">How confident are you in your answer to the above question?</label>
+                            <div class="d-flex justify-content-between text-muted small mb-1">
+                                <span>Not Confident</span><span>Highly Confident</span>
+                            </div>
+                            <div class="d-flex justify-content-between px-2">
+                                {% for i in "123456789"|make_list %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q5" id="q5_{{i}}" value="{{i}}" required>
+                                    <label class="form-check-label small" for="q5_{{i}}">{{i}}</label>
+                                </div>
+                                {% endfor %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q5" id="q5_10" value="10" required>
+                                    <label class="form-check-label small" for="q5_10">10</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Q6 -->
+                        <div class="mb-4 bg-dark p-3 rounded border border-secondary">
+                            <label class="form-label fw-bold">Do you see an emergency pathology or abnormality like cauda equina, fractures, or a tumour?</label>
+                            <div class="mt-2">
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="q6" id="q6_yes" value="Yes" required>
+                                    <label class="form-check-label" for="q6_yes">Yes</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="q6" id="q6_no" value="No" required>
+                                    <label class="form-check-label" for="q6_no">No</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Q7 -->
+                        <div class="mb-4 bg-dark p-3 rounded border border-secondary">
+                            <label class="form-label fw-bold">How confident are you in your answer to the above question?</label>
+                            <div class="d-flex justify-content-between text-muted small mb-1">
+                                <span>Not Confident</span><span>Highly Confident</span>
+                            </div>
+                            <div class="d-flex justify-content-between px-2">
+                                {% for i in "123456789"|make_list %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q7" id="q7_{{i}}" value="{{i}}" required>
+                                    <label class="form-check-label small" for="q7_{{i}}">{{i}}</label>
+                                </div>
+                                {% endfor %}
+                                <div class="form-check form-check-inline me-0">
+                                    <input class="form-check-input" type="radio" name="q7" id="q7_10" value="10" required>
+                                    <label class="form-check-label small" for="q7_10">10</label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <button type="submit" class="btn btn-success w-100 mt-2 py-2 fw-bold">Submit Assessment</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Custom styles for radio buttons to look more like the mockup */
+    .form-check-input[type="radio"] {
+        background-color: #343a40;
+        border-color: #6c757d;
+    }
+    .form-check-input[type="radio"]:checked {
+        background-color: #198754;
+        border-color: #198754;
+    }
+    .form-check-inline {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    .form-check-inline .form-check-input {
+        margin-top: 0;
+        margin-bottom: 0.25rem;
+    }
+</style>
+{% endblock %}
