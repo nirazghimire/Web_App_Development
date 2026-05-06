@@ -7,13 +7,15 @@ from django.contrib.auth.forms import UserCreationForm
 from django.http import JsonResponse, HttpResponse
 from django.conf import settings
 from django.contrib import messages
+from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth import login
 import os
 import json
 import shutil
 import traceback
 import pydicom
 
-from .models import DicomSeries, ProcessingResult
+from .models import DicomSeries, ProcessingResult, SurveyResponse
 from .forms import DicomUploadForm
 from .utils import (
     generate_heatmap,
@@ -76,6 +78,27 @@ def dashboard_view(request, series_id=None):
         'ece_probability': ece_probability,
     }
     return render(request, 'dicom_processor/dashboard.html', context)
+
+@login_required
+def survey_view(request, series_id):
+    series = get_object_or_404(DicomSeries, id=series_id, user=request.user)
+    
+    if request.method == "POST":
+        SurveyResponse.objects.create(
+            user=request.user,
+            series=series,
+            q1_image_quality=request.POST.get('q1') or None,
+            q2_consistency=request.POST.get('q2') or None,
+            q3_noise=request.POST.get('q3') or None,
+            q4_canal_clear=request.POST.get('q4'),
+            q5_confidence_q4=request.POST.get('q5') or None,
+            q6_emergency_pathology=request.POST.get('q6'),
+            q7_confidence_q6=request.POST.get('q7') or None,
+        )
+        messages.success(request, "Survey submitted successfully!")
+        return redirect('dicom_processor:my_uploads')
+
+    return render(request, 'dicom_processor/survey.html', {'series': series})
 
 # --- File Handling Views ---
 @login_required

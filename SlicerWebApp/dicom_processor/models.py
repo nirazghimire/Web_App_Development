@@ -59,3 +59,24 @@ class ProcessingResult(models.Model):
     def __str__(self):
         return f"Result for {self.dicom_series.name}"
 
+
+class SurveyResponse(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    series = models.ForeignKey(DicomSeries, on_delete=models.CASCADE)
+    
+    # Q1-Q3 (Scales 1-10)
+    q1_image_quality = models.IntegerField(null=True, blank=True)
+    q2_consistency = models.IntegerField(null=True, blank=True)
+    q3_noise = models.IntegerField(null=True, blank=True)
+    
+    # Q4-Q7
+    q4_canal_clear = models.CharField(max_length=50, null=True, blank=True)
+    q5_confidence_q4 = models.IntegerField(null=True, blank=True)
+    q6_emergency_pathology = models.CharField(max_length=50, null=True, blank=True)
+    q7_confidence_q6 = models.IntegerField(null=True, blank=True)
+    
+    submitted_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Survey by {self.user.username} on {self.series.name}"
+

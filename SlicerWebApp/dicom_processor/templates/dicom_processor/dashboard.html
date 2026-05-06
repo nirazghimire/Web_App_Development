@@ -17,6 +17,9 @@ Dashboard - {{ series.name|default:"Viewer" }}
         </div>
         <div>
             <strong class="text-primary me-3">Series:</strong> {{ series.name|default:"No Series Selected" }}
+            {% if series %}
+            <a href="{% url 'dicom_processor:survey_view' series.id %}" class="btn btn-sm btn-info text-white me-2">Take Survey</a>
+            {% endif %}
             <button id="resetViewsButton" class="btn btn-sm btn-outline-secondary">Reset Views</button>
         </div>
     </div>
