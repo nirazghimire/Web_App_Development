@@ -1,5 +1,5 @@
 # Slicer Web App: Current Project State
-*Last Updated: March 30, 2026*
+*Last Updated: April 16, 2026*
 
 This document serves as a memory bridge for future sessions. You can feed this to the AI or refer to it to know exactly where the project stands.
 
@@ -32,13 +32,25 @@ This document serves as a memory bridge for future sessions. You can feed this t
   - Unzipped the model directly into `~/Web_App_Development/SlicerWebApp/dicom_processor/`.
   - Ran `docker compose ... up -d --build` to force Docker to ingest the newly uploaded AI models into the live container environment.
 
-## 5. Domain & SSL Setup (Completed Config)
-- **Domain**: `siollab.duckdns.org` (via DuckDNS).
-- **SSL**: Configured Let's Encrypt automated SSL certificate generation using a `certbot` Docker container.
-- **NGINX**: Updated reverse proxy to handle ACME challenge over port 80 and serve HTTPS traffic securely over port 443.
-- **Deployment Status**: Code is prepared locally. Awaiting a `git push` to the GCP Server and a run of the newly provided `init-letsencrypt.sh` script to launch the secure server.
+## 5. Domain & SSL Setup (Completed & Live)
+- **Domain**: `siollab.duckdns.org` (via DuckDNS with GCP External IP).
+- **SSL**: Successfully deployed Let's Encrypt automated SSL certificate generation using a `certbot` Docker container.
+- **NGINX**: Integrated reverse proxy to handle ACME challenge over port 80 and serve HTTPS traffic securely over port 443.
+- **Docker Issue Resolved**: Added `nginx/ssl` to `.dockerignore` to prevent permission denied errors during build context transfer of certificates.
+- **Deployment Status**: Fully live! The container successfully builds, issues certificates, and automatically renews them. Traffic is secured over HTTPS.
 
 ## Next Steps / Future Enhancements (Ideas for Tomorrow)
-- **Frontend Decoupling**: Separate the frontend from Django templates and host via GitHub Pages, refactoring authentication to use Token Auth (JWTs).
+- **Architecture Strategy**: Decided to stick with the current monolithic Django Architecture (which is the industry standard) instead of decoupling the frontend to GitHub Pages. This bypasses massive CORS/Token Auth headaches and leverages Django's built-in secure templates.
+- **Cloud Storage (High Priority)**: Currently, DICOM uploads are stored directly on the 30GB GCP Boot disk (`/var/lib/docker/volumes/...`). If multiple users upload medical data, this will crash the server. Must configure Django to upload media to an infinitely scalable **Google Cloud Storage (GCS) Bucket**.
 - **GCP Cost Saving**: Remember to hit "Stop" on the GCP Console to save money when not actively demoing or testing the app.
-- **Cloud Storage**: Consider migrating the actual uploaded DICOM files from the Docker volumes to Google Cloud Storage (Bucket) for infinite scale and cheaper object storage.
+
+
+
+
+
+
+
+
+# Next work:
+# option to add or remove questions/answers.
+# add rating based layout witht around 10 questions maybe?
